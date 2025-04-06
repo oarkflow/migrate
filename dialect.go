@@ -12,7 +12,7 @@ type Dialect interface {
 	AddColumnSQL(ac AddColumn, tableName string) ([]string, error)
 	DropColumnSQL(dc DropColumn, tableName string) (string, error)
 	RenameColumnSQL(rc RenameColumn, tableName string) (string, error)
-	MapDataType(genericType string, size int, autoIncrement, primaryKey bool) string
+	MapDataType(genericType string, size, scale int, autoIncrement bool) string
 	CreateViewSQL(cv CreateView) (string, error)
 	DropViewSQL(dv DropView) (string, error)
 	RenameViewSQL(rv RenameView) (string, error)

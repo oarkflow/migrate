@@ -3,14 +3,14 @@ package main
 import (
 	"log"
 	"os"
-	
+
 	"github.com/oarkflow/bcl"
-	
+
 	"github.com/oarkflow/migrate"
 )
 
 func main() {
-	data, err := os.ReadFile("migrations/1743844642_create_seo_metadatas_table.bcl")
+	data, err := os.ReadFile("migrations/1743913137_create_seo_metadatas_table.bcl")
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)
 	}
@@ -18,7 +18,7 @@ func main() {
 	if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 		log.Fatalf("Failed to unmarshal migration file: %v", err)
 	}
-	dialect := "postgres"
+	dialect := "sqlite"
 	for _, mig := range cfg.Migrations {
 		upQueries, err := mig.ToSQL(dialect, true)
 		if err != nil {

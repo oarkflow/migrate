@@ -2,8 +2,9 @@ package migrate
 
 import (
 	"fmt"
+	"strings"
 	"time"
-	
+
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/oarkflow/bcl"
 )
@@ -67,7 +68,7 @@ func init() {
 	bcl.RegisterFunction("fake_ipv6", func(args ...any) (any, error) {
 		return f.IPv6Address(), nil
 	})
-	// --- New Fake Date Functions ---
+
 	bcl.RegisterFunction("fake_date", func(args ...any) (any, error) {
 		return f.Date(), nil
 	})
@@ -145,87 +146,185 @@ func init() {
 	})
 }
 
-var (
-	mysqlDataTypes = map[string]string{
-		"string":     "VARCHAR",
-		"varchar":    "VARCHAR",
-		"text":       "TEXT",
-		"char":       "CHAR",
-		"number":     "INT",
-		"int":        "INT",
-		"integer":    "INT",
-		"smallint":   "SMALLINT",
-		"mediumint":  "MEDIUMINT",
-		"bigint":     "BIGINT",
-		"float":      "FLOAT",
-		"double":     "DOUBLE",
-		"decimal":    "DECIMAL",
-		"boolean":    "TINYINT(1)",
-		"bool":       "TINYINT(1)",
-		"date":       "DATE",
-		"datetime":   "DATETIME",
-		"time":       "TIME",
-		"timestamp":  "TIMESTAMP",
-		"year":       "YEAR",
-		"blob":       "BLOB",
-		"mediumblob": "MEDIUMBLOB",
-		"longblob":   "LONGBLOB",
-		"binary":     "BLOB",
-		"varbinary":  "VARBINARY",
-		"enum":       "ENUM", // caller must supply enum values in definition if needed
-		"set":        "SET",  // caller must supply set values in definition if needed
-		"json":       "JSON",
+var mysqlDataTypes = map[string]string{
+	"string":     "VARCHAR",
+	"varchar":    "VARCHAR",
+	"text":       "TEXT",
+	"char":       "CHAR",
+	"longtext":   "LONGTEXT",
+	"mediumtext": "MEDIUMTEXT",
+	"tinytext":   "TINYTEXT",
+	"number":     "INT",
+	"int":        "INT",
+	"integer":    "INT",
+	"serial":     "INTEGER",
+	"bigserial":  "BIGINT",
+	"smallint":   "SMALLINT",
+	"mediumint":  "MEDIUMINT",
+	"bigint":     "BIGINT",
+	"tinyint":    "TINYINT",
+	"float":      "FLOAT",
+	"double":     "DOUBLE",
+	"decimal":    "DECIMAL",
+	"numeric":    "DECIMAL",
+	"real":       "DOUBLE",
+	"boolean":    "TINYINT(1)",
+	"bool":       "TINYINT(1)",
+	"date":       "DATE",
+	"datetime":   "DATETIME",
+	"time":       "TIME",
+	"timestamp":  "TIMESTAMP",
+	"year":       "YEAR",
+	"blob":       "BLOB",
+	"mediumblob": "MEDIUMBLOB",
+	"longblob":   "LONGBLOB",
+	"binary":     "BLOB",
+	"varbinary":  "VARBINARY",
+	"enum":       "ENUM",
+	"set":        "SET",
+	"json":       "JSON",
+	"bytea":      "BLOB",
+	"bit":        "BIT",
+}
+
+var postgresDataTypes = map[string]string{
+	"serial":     "SERIAL",
+	"bigserial":  "BIGSERIAL",
+	"string":     "TEXT",
+	"varchar":    "VARCHAR",
+	"text":       "TEXT",
+	"char":       "CHAR",
+	"longtext":   "TEXT",
+	"mediumtext": "TEXT",
+	"tinytext":   "TEXT",
+	"shorttext":  "TEXT",
+	"number":     "INTEGER",
+	"int":        "INTEGER",
+	"integer":    "INTEGER",
+	"smallint":   "SMALLINT",
+	"mediumint":  "INTEGER",
+	"bigint":     "BIGINT",
+	"tinyint":    "SMALLINT",
+	"float":      "REAL",
+	"double":     "DOUBLE PRECISION",
+	"decimal":    "DECIMAL",
+	"numeric":    "NUMERIC",
+	"real":       "REAL",
+	"boolean":    "BOOLEAN",
+	"bool":       "BOOLEAN",
+	"date":       "DATE",
+	"datetime":   "TIMESTAMP",
+	"time":       "TIME",
+	"timestamp":  "TIMESTAMP",
+	"year":       "INTEGER",
+	"blob":       "BYTEA",
+	"mediumblob": "BYTEA",
+	"longblob":   "BYTEA",
+	"binary":     "BYTEA",
+	"varbinary":  "BYTEA",
+	"bytea":      "BYTEA",
+	"enum":       "TEXT",
+	"set":        "TEXT",
+	"json":       "JSON",
+	"jsonb":      "JSONB",
+	"bit":        "BIT",
+}
+
+var sqliteDataTypes = map[string]string{
+	"string":     "TEXT",
+	"varchar":    "VARCHAR",
+	"text":       "TEXT",
+	"char":       "CHAR",
+	"longtext":   "TEXT",
+	"mediumtext": "TEXT",
+	"tinytext":   "TEXT",
+	"number":     "INTEGER",
+	"serial":     "INTEGER",
+	"bigserial":  "INTEGER",
+	"int":        "INTEGER",
+	"integer":    "INTEGER",
+	"smallint":   "INTEGER",
+	"mediumint":  "INTEGER",
+	"bigint":     "INTEGER",
+	"tinyint":    "INTEGER",
+	"float":      "REAL",
+	"double":     "REAL",
+	"decimal":    "NUMERIC",
+	"numeric":    "NUMERIC",
+	"real":       "REAL",
+	"boolean":    "BOOLEAN",
+	"bool":       "BOOLEAN",
+	"date":       "DATE",
+	"datetime":   "DATETIME",
+	"time":       "TIME",
+	"timestamp":  "DATETIME",
+	"year":       "INTEGER",
+	"blob":       "BLOB",
+	"mediumblob": "BLOB",
+	"longblob":   "BLOB",
+	"binary":     "BLOB",
+	"varbinary":  "BLOB",
+	"bytea":      "BLOB",
+	"enum":       "TEXT",
+	"set":        "TEXT",
+	"json":       "TEXT",
+	"bit":        "NUMERIC",
+}
+
+func ConvertType(dataType string, targetDriver string, length, scale int, autoIncrement bool) string {
+	if scale == 0 {
+		scale = 2
 	}
-	postgresDataTypes = map[string]string{
-		"string":    "TEXT",
-		"varchar":   "VARCHAR",
-		"char":      "CHAR",
-		"serial":    "SERIAL",
-		"bigserial": "BIGSERIAL",
-		"text":      "TEXT",
-		"number":    "INTEGER",
-		"integer":   "INTEGER",
-		"smallint":  "SMALLINT",
-		"bigint":    "BIGINT",
-		"decimal":   "DECIMAL",
-		"numeric":   "NUMERIC",
-		"boolean":   "BOOLEAN",
-		"bool":      "BOOLEAN",
-		"date":      "DATE",
-		"datetime":  "TIMESTAMP",
-		"timestamp": "TIMESTAMP",
-		"time":      "TIME",
-		"float":     "REAL",
-		"real":      "REAL",
-		"double":    "DOUBLE PRECISION",
-		"money":     "MONEY",
-		"uuid":      "UUID",
-		"json":      "JSON",
-		"jsonb":     "JSONB",
+	lt := strings.ToLower(dataType)
+	if length > 0 && scale > length {
+		scale = length
 	}
-	sqliteDataTypes = map[string]string{
-		"string":    "TEXT",
-		"varchar":   "VARCHAR",
-		"text":      "TEXT",
-		"char":      "CHAR",
-		"number":    "INTEGER",
-		"integer":   "INTEGER",
-		"smallint":  "INTEGER",
-		"bigint":    "INTEGER",
-		"boolean":   "BOOLEAN",
-		"bool":      "BOOLEAN",
-		"date":      "DATE",
-		"datetime":  "DATETIME",
-		"timestamp": "DATETIME",
-		"time":      "TIME",
-		"float":     "REAL",
-		"double":    "REAL",
-		"real":      "REAL",
-		"decimal":   "NUMERIC",
-		"numeric":   "NUMERIC",
-		"blob":      "BLOB",
-		"binary":    "BLOB",
-		"varbinary": "BLOB",
-		"json":      "TEXT",
+	var dt string
+	var ok bool
+	switch targetDriver {
+	case "mysql":
+		dt, ok = mysqlDataTypes[lt]
+	case "postgres":
+		dt, ok = postgresDataTypes[lt]
+	case "sqlite":
+		dt, ok = sqliteDataTypes[lt]
+	default:
+		return lt
 	}
-)
+	if !ok {
+		return lt
+	}
+	if autoIncrement && targetDriver == "postgres" {
+		switch lt {
+		case "int", "integer", "number", "smallint", "mediumint":
+			if length > 10 {
+				return "BIGSERIAL"
+			}
+			return "SERIAL"
+		case "bigint":
+			return "BIGSERIAL"
+		}
+	}
+	switch lt {
+	case "varchar", "char", "bit":
+		if length > 0 {
+			return fmt.Sprintf("%s(%d)", dt, length)
+		}
+		if lt == "varchar" || lt == "char" {
+			return fmt.Sprintf("%s(255)", dt)
+		}
+	case "string":
+		if length > 0 {
+			return fmt.Sprintf("VARCHAR(%d)", length)
+		}
+		return "VARCHAR(255)"
+	case "decimal", "numeric":
+		if length > 0 {
+			if scale > 0 {
+				return fmt.Sprintf("%s(%d,%d)", dt, length, scale)
+			}
+			return fmt.Sprintf("%s(%d,2)", dt, length)
+		}
+	}
+	return dt
+}

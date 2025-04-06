@@ -23,7 +23,7 @@ func (s *SQLiteDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) 
 		var cols []string
 		var pkCols []string
 		for _, col := range ct.Columns {
-			colDef := fmt.Sprintf("%s %s", s.quoteIdentifier(col.Name), s.MapDataType(col.Type, col.Size, col.AutoIncrement, col.PrimaryKey))
+			colDef := fmt.Sprintf("%s %s", s.quoteIdentifier(col.Name), s.MapDataType(col.Type, col.Size, col.Scale, col.AutoIncrement))
 			if !col.Nullable {
 				colDef += " NOT NULL"
 			}
@@ -104,7 +104,7 @@ func (s *SQLiteDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, 
 	var queries []string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s ", s.quoteIdentifier(tableName), s.quoteIdentifier(ac.Name)))
-	sb.WriteString(s.MapDataType(ac.Type, ac.Size, ac.AutoIncrement, ac.PrimaryKey))
+	sb.WriteString(s.MapDataType(ac.Type, ac.Size, ac.Scale, ac.AutoIncrement))
 	if !ac.Nullable {
 		sb.WriteString(" NOT NULL")
 	}
@@ -143,18 +143,8 @@ func (s *SQLiteDialect) RenameColumnSQL(rc RenameColumn, tableName string) (stri
 	return "", errors.New("SQLite RENAME COLUMN must use table recreation")
 }
 
-func (s *SQLiteDialect) MapDataType(genericType string, size int, autoIncrement, primaryKey bool) string {
-	lt := strings.ToLower(genericType)
-	if dt, ok := sqliteDataTypes[lt]; ok {
-		if (lt == "varchar" || lt == "char") && size > 0 {
-			return fmt.Sprintf("%s(%d)", dt, size)
-		} else if (lt == "decimal" || lt == "numeric") && size > 0 {
-			// Assumes a default scale of 2
-			return fmt.Sprintf("%s(%d,2)", dt, size)
-		}
-		return dt
-	}
-	return genericType
+func (s *SQLiteDialect) MapDataType(genericType string, size, scale int, autoIncrement bool) string {
+	return ConvertType(strings.ToLower(genericType), "sqlite", size, scale, autoIncrement)
 }
 
 func (s *SQLiteDialect) WrapInTransaction(queries []string) []string {

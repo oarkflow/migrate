@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
-	
+
 	"github.com/oarkflow/migrate/drivers"
 )
 
@@ -83,6 +83,7 @@ type AddColumn struct {
 	Default       any         `json:"default,omitempty"`
 	Check         string      `json:"check,omitempty"`
 	Size          int         `json:"size,omitempty"`
+	Scale         int         `json:"scale,omitempty"`
 	AutoIncrement bool        `json:"auto_increment,omitempty"`
 	PrimaryKey    bool        `json:"primary_key,omitempty"`
 	Unique        bool        `json:"unique,omitempty"`

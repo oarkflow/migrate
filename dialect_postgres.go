@@ -23,7 +23,7 @@ func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error
 		var cols []string
 		var pkCols []string
 		for _, col := range ct.Columns {
-			colDef := fmt.Sprintf("%s %s", p.quoteIdentifier(col.Name), p.MapDataType(col.Type, col.Size, col.AutoIncrement, col.PrimaryKey))
+			colDef := fmt.Sprintf("%s %s", p.quoteIdentifier(col.Name), p.MapDataType(col.Type, col.Size, col.Scale, col.AutoIncrement))
 			if !col.Nullable {
 				colDef += " NOT NULL"
 			}
@@ -41,7 +41,7 @@ func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error
 				colDef += fmt.Sprintf(" CHECK (%s)", col.Check)
 			}
 			cols = append(cols, colDef)
-			
+
 			if len(ct.PrimaryKey) == 0 && col.PrimaryKey {
 				pkCols = append(pkCols, p.quoteIdentifier(col.Name))
 			}
@@ -130,7 +130,7 @@ func (p *PostgresDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string
 	var queries []string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s ", p.quoteIdentifier(tableName), p.quoteIdentifier(ac.Name)))
-	sb.WriteString(p.MapDataType(ac.Type, ac.Size, ac.AutoIncrement, ac.PrimaryKey))
+	sb.WriteString(p.MapDataType(ac.Type, ac.Size, ac.Scale, ac.AutoIncrement))
 	if !ac.Nullable {
 		sb.WriteString(" NOT NULL")
 	}
@@ -187,25 +187,8 @@ func (p *PostgresDialect) RenameColumnSQL(rc RenameColumn, tableName string) (st
 	return fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(from), p.quoteIdentifier(rc.To)), nil
 }
 
-func (p *PostgresDialect) MapDataType(genericType string, size int, autoIncrement, primaryKey bool) string {
-	lt := strings.ToLower(genericType)
-	if autoIncrement {
-		// Use BIGSERIAL for bigint types
-		if lt == "bigint" {
-			return "BIGSERIAL"
-		}
-		return "SERIAL"
-	}
-	if dt, ok := postgresDataTypes[lt]; ok {
-		if (lt == "varchar" || lt == "char") && size > 0 {
-			return fmt.Sprintf("%s(%d)", dt, size)
-		} else if (lt == "decimal" || lt == "numeric") && size > 0 {
-			// Assumes a default scale of 2
-			return fmt.Sprintf("%s(%d,2)", dt, size)
-		}
-		return dt
-	}
-	return genericType
+func (p *PostgresDialect) MapDataType(genericType string, size, scale int, autoIncrement bool) string {
+	return ConvertType(strings.ToLower(genericType), "postgres", size, scale, autoIncrement)
 }
 
 func (p *PostgresDialect) CreateViewSQL(cv CreateView) (string, error) {

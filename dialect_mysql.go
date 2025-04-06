@@ -23,7 +23,7 @@ func (m *MySQLDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
 		var cols []string
 		var pkCols []string
 		for _, col := range ct.Columns {
-			colDef := fmt.Sprintf("%s %s", m.quoteIdentifier(col.Name), m.MapDataType(col.Type, col.Size, col.AutoIncrement, col.PrimaryKey))
+			colDef := fmt.Sprintf("%s %s", m.quoteIdentifier(col.Name), m.MapDataType(col.Type, col.Size, col.Scale, col.AutoIncrement))
 			if col.AutoIncrement {
 				colDef += " AUTO_INCREMENT"
 			}
@@ -107,7 +107,7 @@ func (m *MySQLDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, e
 	var queries []string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s ", m.quoteIdentifier(tableName), m.quoteIdentifier(ac.Name)))
-	sb.WriteString(m.MapDataType(ac.Type, ac.Size, ac.AutoIncrement, ac.PrimaryKey))
+	sb.WriteString(m.MapDataType(ac.Type, ac.Size, ac.Scale, ac.AutoIncrement))
 	if ac.AutoIncrement {
 		sb.WriteString(" AUTO_INCREMENT")
 	}
@@ -170,18 +170,8 @@ func (m *MySQLDialect) RenameColumnSQL(rc RenameColumn, tableName string) (strin
 	return fmt.Sprintf("ALTER TABLE %s CHANGE %s %s %s;", m.quoteIdentifier(tableName), m.quoteIdentifier(from), m.quoteIdentifier(rc.To), rc.Type), nil
 }
 
-func (m *MySQLDialect) MapDataType(genericType string, size int, autoIncrement, primaryKey bool) string {
-	lt := strings.ToLower(genericType)
-	if dt, ok := mysqlDataTypes[lt]; ok {
-		if (lt == "string" || lt == "varchar") && size > 0 {
-			return fmt.Sprintf("%s(%d)", dt, size)
-		} else if lt == "decimal" && size > 0 {
-			// Default scale of 2 is assumed
-			return fmt.Sprintf("DECIMAL(%d,2)", size)
-		}
-		return dt
-	}
-	return genericType
+func (m *MySQLDialect) MapDataType(genericType string, size, scale int, autoIncrement bool) string {
+	return ConvertType(strings.ToLower(genericType), "mysql", size, scale, autoIncrement)
 }
 
 func (m *MySQLDialect) WrapInTransaction(queries []string) []string {
