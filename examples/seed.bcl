@@ -10,6 +10,7 @@ Seed "extendedTest" {
     }
     Field "allowed_to_vote" {
         value = age > 20 ? true : false
+		data_type = "boolean"
     }
     combine = ["name", "status"]
     condition = "if_exists"

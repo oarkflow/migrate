@@ -253,15 +253,25 @@ func (m *MySQLDialect) RenameTriggerSQL(rt RenameTrigger) (string, error) {
 }
 
 func (m *MySQLDialect) InsertSQL(table string, columns []string, values []any) (string, error) {
-	quotedCols := []string{}
+	var quotedCols []string
 	for _, col := range columns {
 		quotedCols = append(quotedCols, m.quoteIdentifier(col))
 	}
-	quotedVals := []string{}
+	var quotedVals []string
 	for _, val := range values {
 		switch v := val.(type) {
 		case string:
-			quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			if v == "true" {
+				quotedVals = append(quotedVals, "1")
+				continue
+			}
+			if v == "false" {
+				quotedVals = append(quotedVals, "0")
+				continue
+			}
+			if !(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
+				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			}
 		case nil:
 			quotedVals = append(quotedVals, "NULL")
 		default:

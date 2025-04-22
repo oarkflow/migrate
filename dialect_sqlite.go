@@ -251,15 +251,21 @@ func (s *SQLiteDialect) EOS() string {
 }
 
 func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) (string, error) {
-	quotedCols := []string{}
+	var quotedCols []string
 	for _, col := range columns {
 		quotedCols = append(quotedCols, s.quoteIdentifier(col))
 	}
-	quotedVals := []string{}
+	var quotedVals []string
 	for _, val := range values {
 		switch v := val.(type) {
 		case string:
-			quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			if v == "true" || v == "false" {
+				quotedVals = append(quotedVals, v)
+				continue
+			}
+			if !(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
+				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			}
 		case nil:
 			quotedVals = append(quotedVals, "NULL")
 		default:

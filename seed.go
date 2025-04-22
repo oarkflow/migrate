@@ -2,8 +2,9 @@ package migrate
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
-	
+
 	"github.com/oarkflow/bcl"
 )
 
@@ -21,10 +22,11 @@ type SeedDefinition struct {
 }
 
 type FieldDefinition struct {
-	Name   string `json:"name"`
-	Value  any    `json:"value"`
-	Unique bool   `json:"unique"`
-	Random bool   `json:"random"`
+	Name     string `json:"name"`
+	Value    any    `json:"value"`
+	Unique   bool   `json:"unique"`
+	Random   bool   `json:"random"`
+	DataType string `json:"data_type"`
 }
 
 func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
@@ -36,7 +38,7 @@ func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
 				if err == nil {
 					switch rs := rs.(type) {
 					case string:
-						return fmt.Sprintf("'%s'", rs)
+						return rs
 					default:
 						return fmt.Sprintf("%v", rs)
 					}
@@ -46,10 +48,10 @@ func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
 		return val
 	}
 	dial := GetDialect(dialect)
-	queries := []string{}
+	var queries []string
 	for i := 0; i < s.Rows; i++ {
-		cols := []string{}
-		vals := []any{}
+		var cols []string
+		var vals []any
 		for _, field := range s.Fields {
 			val := fmt.Sprintf("%v", field.Value)
 			cols = append(cols, field.Name)
@@ -58,6 +60,21 @@ func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
 				evaluated = getRandomValue(val)
 			} else {
 				evaluated = mutate(val)
+			}
+			if field.DataType != "" {
+				dt := strings.ToLower(field.DataType)
+				if dt == "string" || dt == "varchar" || dt == "char" || dt == "text" {
+					if !(strings.HasPrefix(evaluated, "'") && strings.HasSuffix(evaluated, "'")) {
+						evaluated = fmt.Sprintf("'%s'", evaluated)
+					}
+				} else if dt == "boolean" || dt == "bool" {
+					b, err := strconv.ParseBool(evaluated)
+					if err == nil {
+						evaluated = fmt.Sprintf("%t", b)
+					} else {
+						evaluated = strings.ToLower(evaluated)
+					}
+				}
 			}
 			vals = append(vals, evaluated)
 		}

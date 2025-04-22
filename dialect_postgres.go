@@ -179,10 +179,10 @@ func (p *PostgresDialect) RenameColumnSQL(rc RenameColumn, tableName string) (st
 		from = rc.Name
 	}
 	if from == "" {
-		return "", errors.New("Postgres requires column name for renaming column")
+		return "", errors.New("postgres requires column name for renaming column")
 	}
 	if rc.To == "" {
-		return "", errors.New("Postgres requires new column name for renaming column")
+		return "", errors.New("postgres requires new column name for renaming column")
 	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(from), p.quoteIdentifier(rc.To)), nil
 }
@@ -300,15 +300,21 @@ func (p *PostgresDialect) WrapInTransactionWithConfig(queries []string, trans Tr
 }
 
 func (p *PostgresDialect) InsertSQL(table string, columns []string, values []any) (string, error) {
-	quotedCols := []string{}
+	var quotedCols []string
 	for _, col := range columns {
 		quotedCols = append(quotedCols, p.quoteIdentifier(col))
 	}
-	quotedVals := []string{}
+	var quotedVals []string
 	for _, val := range values {
 		switch v := val.(type) {
 		case string:
-			quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			if v == "true" || v == "false" {
+				quotedVals = append(quotedVals, v)
+				continue
+			}
+			if !(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
+				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			}
 		case nil:
 			quotedVals = append(quotedVals, "NULL")
 		default:
