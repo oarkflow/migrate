@@ -4,18 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-	
+
 	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/console"
 	"github.com/oarkflow/cli/contracts"
-	"github.com/oarkflow/json"
 	"github.com/oarkflow/log"
 	"github.com/oarkflow/squealx"
 )
@@ -55,6 +53,7 @@ type Manager struct {
 	client        contracts.Cli
 	dbDriver      IDatabaseDriver
 	historyDriver HistoryDriver
+	Verbose       bool // <-- new field added for verbose mode
 }
 
 type ManagerOption func(*Manager)
@@ -148,7 +147,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 			if h.Checksum == checksum {
 				return nil
 			}
-			return fmt.Errorf("checksum mismatch for migration %s", m.Name)
+			return errors.New("changes found in migration file after migration was applied")
 		}
 	}
 	var cfg Config
@@ -159,9 +158,16 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		return fmt.Errorf("no migration found in file %s", m.Name)
 	}
 	migration := cfg.Migrations[0]
+
 	queries, err := migration.ToSQL(d.dialect, true)
 	if err != nil {
 		return fmt.Errorf("failed to generate SQL: %w", err)
+	}
+	if d.Verbose {
+		logger.Info().Msgf("Migration '%s' details:", m.Name)
+		for _, q := range queries {
+			logger.Info().Msg(q)
+		}
 	}
 	if d.dbDriver == nil {
 		return fmt.Errorf("no database driver configured")
@@ -192,7 +198,6 @@ func (d *Manager) ApplyMigration(m Migration) error {
 }
 
 func (d *Manager) RollbackMigration(step int) error {
-	
 	histories, err := d.historyDriver.Load()
 	if err != nil {
 		return err
@@ -201,7 +206,6 @@ func (d *Manager) RollbackMigration(step int) error {
 	if step <= 0 || step > total {
 		return fmt.Errorf("rollback step %d is out of range, total applied: %d", step, total)
 	}
-	
 	for i := 0; i < step; i++ {
 		last := histories[len(histories)-1]
 		name := last.Name
@@ -222,32 +226,30 @@ func (d *Manager) RollbackMigration(step int) error {
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
 		}
+		// If in verbose mode, show rollback details.
+		if d.Verbose {
+			logger.Info().Msgf("Rollback of migration '%s' details:", name)
+			for _, q := range downQueries {
+				logger.Info().Msg(q)
+			}
+		}
 		if err := d.dbDriver.ApplySQL(downQueries); err != nil {
 			return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
-		
 		histories = histories[:len(histories)-1]
 	}
-	
-	if fh, ok := d.historyDriver.(*FileHistoryDriver); ok {
-		data, err := json.Marshal(histories)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(fh.filePath, data, 0644)
-	}
-	return nil
+	return d.historyDriver.Rollback(histories...)
 }
 
 func (d *Manager) ResetMigrations() error {
 	logger.Info().Msg("Resetting migrations...")
-	
+
 	histories, err := d.historyDriver.Load()
 	if err != nil {
 		return err
 	}
-	
+
 	for i := len(histories) - 1; i >= 0; i-- {
 		name := histories[i].Name
 		path := filepath.Join(d.migrationDir, name+".bcl")
@@ -272,7 +274,7 @@ func (d *Manager) ResetMigrations() error {
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
 	}
-	
+
 	if fh, ok := d.historyDriver.(*FileHistoryDriver); ok {
 		return os.WriteFile(fh.filePath, []byte("[]"), 0644)
 	}
@@ -280,7 +282,7 @@ func (d *Manager) ResetMigrations() error {
 }
 
 func (d *Manager) ValidateMigrations() error {
-	files, err := ioutil.ReadDir(d.migrationDir)
+	files, err := os.ReadDir(d.migrationDir)
 	if err != nil {
 		return fmt.Errorf("failed to read migration directory: %w", err)
 	}
@@ -288,7 +290,7 @@ func (d *Manager) ValidateMigrations() error {
 	if err != nil {
 		return err
 	}
-	
+
 	applied := make(map[string]bool)
 	for _, h := range histories {
 		applied[h.Name] = true
@@ -304,7 +306,7 @@ func (d *Manager) ValidateMigrations() error {
 	}
 	toApply := len(missing)
 	if toApply > 0 {
-		logger.Info().Msgf("Migration initiated for : %v migration(s)", toApply)
+		logger.Info().Msgf("Migration initiated for: %v migration(s)", toApply)
 		return nil
 	}
 	logger.Info().Msg("Migrations are up to date.")
@@ -347,7 +349,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, viewName, viewName, viewName)
 			} else if objType == "function" {
-				
+
 				funcName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -479,7 +481,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, triggerName, triggerName)
 			} else {
-				
+
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -547,7 +549,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, triggerName, triggerName)
 			} else {
-				
+
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -594,7 +596,6 @@ func defaultTemplate(name string) string {
 }
 
 type MakeMigrationCommand struct {
-	extend contracts.Extend
 	Driver IManager
 }
 
@@ -607,11 +608,19 @@ func (c *MakeMigrationCommand) Description() string {
 }
 
 func (c *MakeMigrationCommand) Extend() contracts.Extend {
-	return c.extend
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable verbose output",
+				Value:   "false",
+			},
+		},
+	}
 }
 
 func (c *MakeMigrationCommand) Handle(ctx contracts.Context) error {
-	
 	name := ctx.Argument(0)
 	if name == "" {
 		return errors.New("migration name is required")
@@ -620,7 +629,6 @@ func (c *MakeMigrationCommand) Handle(ctx contracts.Context) error {
 }
 
 type MigrateCommand struct {
-	extend contracts.Extend
 	Driver IManager
 }
 
@@ -633,7 +641,16 @@ func (c *MigrateCommand) Description() string {
 }
 
 func (c *MigrateCommand) Extend() contracts.Extend {
-	return c.extend
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable verbose output",
+				Value:   "false",
+			},
+		},
+	}
 }
 
 func acquireLock() error {
@@ -658,7 +675,7 @@ func releaseLock() error {
 func runPreUpChecks(checks []string) error {
 	for _, check := range checks {
 		logger.Printf("Executing PreUpCheck: %s", check)
-		
+
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PreUp check failed: %s", check)
 		}
@@ -670,7 +687,7 @@ func runPreUpChecks(checks []string) error {
 func runPostUpChecks(checks []string) error {
 	for _, check := range checks {
 		logger.Printf("Executing PostUpCheck: %s", check)
-		
+
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PostUp check failed: %s", check)
 		}
@@ -680,7 +697,11 @@ func runPostUpChecks(checks []string) error {
 }
 
 func (c *MigrateCommand) Handle(ctx contracts.Context) error {
-	
+	// Set verbose flag on Manager if -v is passed
+	verbose := ctx.Option("v") != ""
+	if mgr, ok := c.Driver.(*Manager); ok {
+		mgr.Verbose = verbose
+	}
 	if err := c.Driver.ValidateHistoryStorage(); err != nil {
 		return fmt.Errorf("history storage validation failed: %w", err)
 	}
@@ -737,7 +758,6 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 }
 
 type RollbackCommand struct {
-	extend contracts.Extend
 	Driver IManager
 }
 
@@ -750,10 +770,23 @@ func (c *RollbackCommand) Description() string {
 }
 
 func (c *RollbackCommand) Extend() contracts.Extend {
-	return c.extend
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable verbose output",
+				Value:   "false",
+			},
+		},
+	}
 }
 
 func (c *RollbackCommand) Handle(ctx contracts.Context) error {
+	verbose := ctx.Option("v") != ""
+	if mgr, ok := c.Driver.(*Manager); ok {
+		mgr.Verbose = verbose
+	}
 	stepStr := ctx.Option("step")
 	step := 1
 	if stepStr != "" {
@@ -767,7 +800,6 @@ func (c *RollbackCommand) Handle(ctx contracts.Context) error {
 }
 
 type ResetCommand struct {
-	extend contracts.Extend
 	Driver IManager
 }
 
@@ -780,7 +812,16 @@ func (c *ResetCommand) Description() string {
 }
 
 func (c *ResetCommand) Extend() contracts.Extend {
-	return c.extend
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable verbose output",
+				Value:   "false",
+			},
+		},
+	}
 }
 
 func (c *ResetCommand) Handle(ctx contracts.Context) error {
@@ -788,7 +829,6 @@ func (c *ResetCommand) Handle(ctx contracts.Context) error {
 }
 
 type ValidateCommand struct {
-	extend contracts.Extend
 	Driver IManager
 }
 
@@ -801,7 +841,16 @@ func (c *ValidateCommand) Description() string {
 }
 
 func (c *ValidateCommand) Extend() contracts.Extend {
-	return c.extend
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable verbose output",
+				Value:   "false",
+			},
+		},
+	}
 }
 
 func (c *ValidateCommand) Handle(ctx contracts.Context) error {

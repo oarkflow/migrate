@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
-	
+
 	"github.com/oarkflow/json"
 	"github.com/oarkflow/squealx"
 	"github.com/oarkflow/squealx/drivers/mysql"
@@ -26,8 +26,9 @@ type MigrationHistory struct {
 type HistoryDriver interface {
 	Save(history MigrationHistory) error
 	Load() ([]MigrationHistory, error)
-	// ValidateStorage checks if the history storage exists and is accessible.
 	ValidateStorage() error
+	// New method to remove a migration history record.
+	Rollback(history ...MigrationHistory) error
 }
 
 // FileHistoryDriver implements the HistoryDriver interface using a file.
@@ -101,16 +102,7 @@ func NewDB(dialect, dsn string) (*squealx.DB, error) {
 	}
 }
 
-// NewDatabaseHistoryDriver creates a new database history driver using squealx.
-func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDriver, error) {
-	db, err := NewDB(dialect, dsn)
-	if err != nil {
-		return nil, err
-	}
-	table := "migrations"
-	if len(tables) > 0 {
-		table = tables[0]
-	}
+func SetupMigrationHistoryTable(dialect string, db *squealx.DB, table string) error {
 	dial := GetDialect(dialect)
 	stmt := CreateTable{
 		Name: table,
@@ -125,14 +117,15 @@ func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDri
 	}
 	existsQuery := dial.TableExistsSQL(table)
 	var exists bool
-	err = db.Select(&exists, existsQuery)
+	err := db.Select(&exists, existsQuery)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !exists {
+		logger.Info().Msg("Setting up migration history table...")
 		query, err := dial.CreateTableSQL(stmt, true)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		queries := strings.Split(query, dial.EOS())
 		for _, q := range queries {
@@ -141,9 +134,26 @@ func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDri
 				continue
 			}
 			if _, err := db.Exec(q); err != nil {
-				return nil, err
+				return err
 			}
 		}
+	}
+	return nil
+}
+
+// NewDatabaseHistoryDriver creates a new database history driver using squealx.
+func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDriver, error) {
+	db, err := NewDB(dialect, dsn)
+	if err != nil {
+		return nil, err
+	}
+	table := "migrations"
+	if len(tables) > 0 {
+		table = tables[0]
+	}
+	err = SetupMigrationHistoryTable(dialect, db, table)
+	if err != nil {
+		return nil, err
 	}
 	return &DatabaseHistoryDriver{db: db, dialect: dialect, table: table}, nil
 }
@@ -171,6 +181,31 @@ func (d *DatabaseHistoryDriver) Load() ([]MigrationHistory, error) {
 }
 
 func (d *DatabaseHistoryDriver) ValidateStorage() error {
-	// Assume that the migration_history table has been created already.
-	return nil
+	return SetupMigrationHistoryTable(d.dialect, d.db, d.table)
+}
+
+// FileHistoryDriver: implement Rollback by removing the record from the file.
+func (f *FileHistoryDriver) Rollback(histories ...MigrationHistory) error {
+	data, err := json.Marshal(histories)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(f.filePath, data, 0644)
+}
+
+// DatabaseHistoryDriver: implement Rollback by executing a DELETE query.
+func (d *DatabaseHistoryDriver) Rollback(histories ...MigrationHistory) error {
+	var migrations []string
+	for _, h := range histories {
+		migrations = append(migrations, fmt.Sprintf("'%s'", h.Name))
+	}
+	migrationList := strings.Join(migrations, ", ")
+	var query string
+	if migrationList == "" {
+		query = fmt.Sprintf("DELETE FROM %s", d.table)
+	} else {
+		query = fmt.Sprintf("DELETE FROM %s WHERE name NOT IN (%s);", d.table, migrationList)
+	}
+	_, err := d.db.Exec(query)
+	return err
 }
