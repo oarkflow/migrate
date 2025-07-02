@@ -45,6 +45,13 @@ type MigrationChange struct {
 	Details       string
 }
 
+// Add MigrationGroup type definition
+type MigrationGroup struct {
+	Date          time.Time
+	MigrationName string
+	Actions       []MigrationChange
+}
+
 func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	objectName := ctx.Option("object")
 	if objectName == "" {
@@ -309,8 +316,22 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 			}
 		}
 	}
+	migrationMap := make(map[string]*MigrationGroup)
+	var migrationOrder []string
 
-	report := generateHTMLReport(objectName, changes, finalTable, finalView, finalFunction, finalProcedure, finalTrigger)
+	for _, ch := range changes {
+		key := ch.Date.Format("20060102150405") + "_" + ch.MigrationName
+		if _, ok := migrationMap[key]; !ok {
+			migrationMap[key] = &MigrationGroup{
+				Date:          ch.Date,
+				MigrationName: ch.MigrationName,
+			}
+			migrationOrder = append(migrationOrder, key)
+		}
+		migrationMap[key].Actions = append(migrationMap[key].Actions, ch)
+	}
+
+	report := generateHTMLReportAccordion(objectName, migrationMap, migrationOrder, finalTable, finalView, finalFunction, finalProcedure, finalTrigger)
 	reportPath := filepath.Join(".", fmt.Sprintf("history_%s_%d.html", objectName, time.Now().Unix()))
 	if err := os.WriteFile(reportPath, []byte(report), 0644); err != nil {
 		return fmt.Errorf("failed to write HTML report: %w", err)
@@ -447,6 +468,100 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 		html += `<b>Object does not exist (dropped).</b>`
 	}
 	html += `</div>
+</body>
+</html>`
+	return html
+}
+
+// Accordion HTML report generator
+func generateHTMLReportAccordion(
+	objectName string,
+	migrationMap map[string]*MigrationGroup,
+	migrationOrder []string,
+	finalTable *CreateTable,
+	finalView *CreateView,
+	finalFunction *CreateFunction,
+	finalProcedure *CreateProcedure,
+	finalTrigger *CreateTrigger,
+) string {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>History Report - ` + objectName + `</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 2em; background: #f8f9fa; }
+h1 { color: #333; }
+.accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
+.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; font-weight: bold; }
+.accordion-content { display: none; padding: 1em; }
+.accordion.active .accordion-content { display: block; }
+.accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
+.accordion.active .accordion-header:after { transform: rotate(-180deg); }
+.event { margin-bottom: 1.5em; }
+.event .op { font-weight: bold; color: #007bff; }
+.event .details { margin-bottom: 0.5em; }
+.event .migration { color: #888; font-size: 0.95em; }
+.final-structure { background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 8px; }
+th, td { padding: 0.5em 1em; border-bottom: 1px solid #eee; }
+ul { margin: 0; padding-left: 1.2em; }
+pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>History Report: ` + objectName + `</h1>
+<div id="history-accordion">`
+
+	for idx, key := range migrationOrder {
+		group := migrationMap[key]
+		html += `<div class="accordion` + func() string {
+			if idx == 0 {
+				return " active"
+			}
+			return ""
+		}() + `">
+  <div class="accordion-header">` + group.Date.Format(time.RFC1123) + ` &mdash; Migration: <b>` + group.MigrationName + `</b></div>
+  <div class="accordion-content">`
+		for _, ch := range group.Actions {
+			html += `<div class="event">
+  <div class="op">` + ch.Operation + `</div>
+  <div class="details">` + ch.Details + `</div>
+</div>
+`
+		}
+		html += `</div></div>`
+	}
+
+	html += `</div>
+<h2>Final Structure</h2>
+<div class="final-structure">`
+	switch {
+	case finalTable != nil:
+		html += `<table><tr><th>Column</th><th>Type</th><th>PK</th><th>AI</th><th>Unique</th><th>Index</th><th>Nullable</th><th>Default</th><th>Check</th></tr>`
+		for _, col := range finalTable.Columns {
+			html += `<tr><td>` + col.Name + `</td><td>` + col.Type + `</td><td>` + boolStr(col.PrimaryKey) + `</td><td>` + boolStr(col.AutoIncrement) + `</td><td>` + boolStr(col.Unique) + `</td><td>` + boolStr(col.Index) + `</td><td>` + boolStr(col.Nullable) + `</td><td>` + fmt.Sprintf("%v", col.Default) + `</td><td>` + col.Check + `</td></tr>`
+		}
+		html += `</table>`
+	case finalView != nil:
+		html += describeView(*finalView)
+	case finalFunction != nil:
+		html += describeFunction(*finalFunction)
+	case finalProcedure != nil:
+		html += describeProcedure(*finalProcedure)
+	case finalTrigger != nil:
+		html += describeTrigger(*finalTrigger)
+	default:
+		html += `<b>Object does not exist (dropped).</b>`
+	}
+	html += `</div>
+<script>
+document.querySelectorAll('.accordion-header').forEach(function(header) {
+	header.addEventListener('click', function() {
+		var acc = header.parentElement;
+		acc.classList.toggle('active');
+	});
+});
+</script>
 </body>
 </html>`
 	return html
