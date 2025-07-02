@@ -180,6 +180,10 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		return fmt.Errorf("failed to unmarshal migration file: %w", err)
 	}
 	migration := cfg.Migration
+	// Add requiredFields check for migration.Name
+	if err := requireFields(migration.Name); err != nil {
+		return fmt.Errorf("ApplyMigration: %w", err)
+	}
 	queries, err := migration.ToSQL(d.dialect, true)
 	if err != nil {
 		return fmt.Errorf("failed to generate SQL: %w", err)
@@ -240,6 +244,10 @@ func (d *Manager) RollbackMigration(step int) error {
 			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
 		}
 		migration := cfg.Migration
+		// Add requiredFields check for migration.Name
+		if err := requireFields(migration.Name); err != nil {
+			return fmt.Errorf("RollbackMigration: %w", err)
+		}
 		downQueries, err := migration.ToSQL(d.dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
@@ -280,6 +288,10 @@ func (d *Manager) ResetMigrations() error {
 			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
 		}
 		migration := cfg.Migration
+		// Add requiredFields check for migration.Name
+		if err := requireFields(migration.Name); err != nil {
+			return fmt.Errorf("ResetMigrations: %w", err)
+		}
 		downQueries, err := migration.ToSQL(d.dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
@@ -830,6 +842,10 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			return fmt.Errorf("failed to unmarshal migration file %s: %w", name, err)
 		}
 		migration := cfg.Migration
+		// Add requiredFields check for migration.Name
+		if err := requireFields(migration.Name); err != nil {
+			return fmt.Errorf("MigrateCommand.Handle: %w", err)
+		}
 		for _, val := range migration.Validate {
 			if err := runPreUpChecks(val.PreUpChecks); err != nil {
 				return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
@@ -848,12 +864,20 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		// --- SEEDING LOGIC ---
 		if shouldSeed {
 			for _, ct := range migration.Up.CreateTable {
+				// Add requiredFields check for ct.Name
+				if err := requireFields(ct.Name); err != nil {
+					return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
+				}
 				seedDef := SeedDefinition{
 					Name:  "auto_seed_" + ct.Name,
 					Table: ct.Name,
 					Rows:  seedRows,
 				}
 				for _, col := range ct.Columns {
+					// Add requiredFields check for col.Name
+					if err := requireFields(col.Name); err != nil {
+						return fmt.Errorf("MigrateCommand.Handle (seed column): %w", err)
+					}
 					if col.AutoIncrement || col.Nullable {
 						continue
 					}

@@ -67,6 +67,10 @@ func convertSeedValue(val any, dataType string) any {
 }
 
 func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
+	// Check required fields for SeedDefinition
+	if err := requireFields(s.Name, s.Table); err != nil {
+		return nil, fmt.Errorf("SeedDefinition.ToSQL: %w", err)
+	}
 	mutate := func(val string) string {
 		if strings.HasPrefix(val, "fake_") {
 			fn, ok := bcl.LookupFunction(val)
@@ -116,6 +120,10 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 		rowValues := make(map[string]any)
 		exprFields := make(map[string]*FieldDefinition)
 		for idx, field := range s.Fields {
+			// Check required fields for FieldDefinition
+			if err := requireFields(field.Name); err != nil {
+				return nil, fmt.Errorf("SeedDefinition.ToSQL (field): %w", err)
+			}
 			val := fmt.Sprintf("%v", field.Value)
 			if strings.HasPrefix(val, "expr:") {
 				exprFields[field.Name] = &s.Fields[idx]

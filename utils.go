@@ -159,9 +159,6 @@ func init() {
 	bcl.RegisterFunction("fake_status", func(args ...any) (any, error) {
 		return f.RandomString([]string{"ACTIVE", "INACTIVE", "BANNED", "SUSPENDED"}), nil
 	})
-	bcl.RegisterFunction("fake_day", func(args ...any) (any, error) {
-		return f.Date().Day(), nil
-	})
 	bcl.RegisterFunction("fake_bool", func(args ...any) (any, error) {
 		return f.Bool(), nil
 	})

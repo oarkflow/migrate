@@ -18,6 +18,9 @@ func (p *PostgresDialect) TableExistsSQL(table string) string {
 }
 
 func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
+	if err := requireFields(ct.Name); err != nil {
+		return "", fmt.Errorf("PostgresDialect.CreateTableSQL: %w", err)
+	}
 	if up {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", p.quoteIdentifier(ct.Name)))
@@ -75,6 +78,9 @@ func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error
 }
 
 func (p *PostgresDialect) RenameTableSQL(rt RenameTable) (string, error) {
+	if err := requireFields(rt.OldName, rt.NewName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameTableSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME TO %s;", p.quoteIdentifier(rt.OldName), p.quoteIdentifier(rt.NewName)), nil
 }
 
@@ -128,6 +134,9 @@ func (p *PostgresDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 }
 
 func (p *PostgresDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, error) {
+	if err := requireFields(ac.Name, tableName); err != nil {
+		return nil, fmt.Errorf("PostgresDialect.AddColumnSQL: %w", err)
+	}
 	var queries []string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s ", p.quoteIdentifier(tableName), p.quoteIdentifier(ac.Name)))
@@ -171,10 +180,16 @@ func (p *PostgresDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string
 }
 
 func (p *PostgresDialect) DropColumnSQL(dc DropColumn, tableName string) (string, error) {
+	if err := requireFields(dc.Name, tableName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.DropColumnSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(dc.Name)), nil
 }
 
 func (p *PostgresDialect) RenameColumnSQL(rc RenameColumn, tableName string) (string, error) {
+	if err := requireFields(tableName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameColumnSQL: %w", err)
+	}
 	from := rc.From
 	if from == "" && rc.Name != "" {
 		from = rc.Name

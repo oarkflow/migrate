@@ -17,6 +17,9 @@ func (s *SQLiteDialect) TableExistsSQL(table string) string {
 }
 
 func (s *SQLiteDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
+	if err := requireFields(ct.Name); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.CreateTableSQL: %w", err)
+	}
 	if up {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", s.quoteIdentifier(ct.Name)))
@@ -73,6 +76,9 @@ func (s *SQLiteDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) 
 }
 
 func (s *SQLiteDialect) RenameTableSQL(rt RenameTable) (string, error) {
+	if err := requireFields(rt.OldName, rt.NewName); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.RenameTableSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME TO %s;", s.quoteIdentifier(rt.OldName), s.quoteIdentifier(rt.NewName)), nil
 }
 
@@ -101,6 +107,9 @@ func (s *SQLiteDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 }
 
 func (s *SQLiteDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, error) {
+	if err := requireFields(ac.Name, tableName); err != nil {
+		return nil, fmt.Errorf("SQLiteDialect.AddColumnSQL: %w", err)
+	}
 	var queries []string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s ", s.quoteIdentifier(tableName), s.quoteIdentifier(ac.Name)))
@@ -136,10 +145,16 @@ func (s *SQLiteDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, 
 }
 
 func (s *SQLiteDialect) DropColumnSQL(dc DropColumn, tableName string) (string, error) {
+	if err := requireFields(dc.Name, tableName); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.DropColumnSQL: %w", err)
+	}
 	return "", errors.New("SQLite DROP COLUMN must use table recreation")
 }
 
 func (s *SQLiteDialect) RenameColumnSQL(rc RenameColumn, tableName string) (string, error) {
+	if err := requireFields(tableName); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.RenameColumnSQL: %w", err)
+	}
 	return "", errors.New("SQLite RENAME COLUMN must use table recreation")
 }
 

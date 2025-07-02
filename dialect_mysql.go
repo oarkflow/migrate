@@ -17,6 +17,9 @@ func (m *MySQLDialect) TableExistsSQL(table string) string {
 }
 
 func (m *MySQLDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
+	if err := requireFields(ct.Name); err != nil {
+		return "", fmt.Errorf("MySQLDialect.CreateTableSQL: %w", err)
+	}
 	if up {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", m.quoteIdentifier(ct.Name)))
@@ -76,6 +79,9 @@ func (m *MySQLDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
 }
 
 func (m *MySQLDialect) RenameTableSQL(rt RenameTable) (string, error) {
+	if err := requireFields(rt.OldName, rt.NewName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameTableSQL: %w", err)
+	}
 	return fmt.Sprintf("RENAME TABLE %s TO %s;", m.quoteIdentifier(rt.OldName), m.quoteIdentifier(rt.NewName)), nil
 }
 
@@ -104,6 +110,9 @@ func (m *MySQLDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 }
 
 func (m *MySQLDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, error) {
+	if err := requireFields(ac.Name, tableName); err != nil {
+		return nil, fmt.Errorf("MySQLDialect.AddColumnSQL: %w", err)
+	}
 	var queries []string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s ", m.quoteIdentifier(tableName), m.quoteIdentifier(ac.Name)))
@@ -150,10 +159,16 @@ func (m *MySQLDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, e
 }
 
 func (m *MySQLDialect) DropColumnSQL(dc DropColumn, tableName string) (string, error) {
+	if err := requireFields(dc.Name, tableName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.DropColumnSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", m.quoteIdentifier(tableName), m.quoteIdentifier(dc.Name)), nil
 }
 
 func (m *MySQLDialect) RenameColumnSQL(rc RenameColumn, tableName string) (string, error) {
+	if err := requireFields(tableName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameColumnSQL: %w", err)
+	}
 	if rc.Type == "" {
 		return "", errors.New("MySQL requires column type for renaming column")
 	}
