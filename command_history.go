@@ -52,13 +52,74 @@ type MigrationGroup struct {
 	Actions       []MigrationChange
 }
 
+type objectInfo struct {
+	Name string
+	Type string
+}
+
 func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	objectName := ctx.Option("object")
-	if objectName == "" {
-		return fmt.Errorf("please specify --object=<name>")
-	}
-	objectName = strings.ToLower(objectName)
 	files, err := os.ReadDir(c.Driver.MigrationDir())
+	if err != nil {
+		return fmt.Errorf("failed to read migration directory: %w", err)
+	}
+
+	var fileNames []string
+	for _, f := range files {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".bcl") {
+			fileNames = append(fileNames, f.Name())
+		}
+	}
+	sort.Strings(fileNames)
+
+	// Collect all objects (tables, views, functions, procedures, triggers)
+	objectSet := make(map[string]string) // name -> type
+	for _, fname := range fileNames {
+		path := filepath.Join(c.Driver.MigrationDir(), fname)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var cfg Config
+		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
+			continue
+		}
+		m := cfg.Migration
+		for _, ct := range m.Up.CreateTable {
+			objectSet[strings.ToLower(ct.Name)] = "table"
+		}
+		for _, cv := range m.Up.CreateView {
+			objectSet[strings.ToLower(cv.Name)] = "view"
+		}
+		for _, cf := range m.Up.CreateFunction {
+			objectSet[strings.ToLower(cf.Name)] = "function"
+		}
+		for _, cp := range m.Up.CreateProcedure {
+			objectSet[strings.ToLower(cp.Name)] = "procedure"
+		}
+		for _, ct := range m.Up.CreateTrigger {
+			objectSet[strings.ToLower(ct.Name)] = "trigger"
+		}
+	}
+
+	// If no object specified, generate report for all objects
+	if objectName == "" {
+		var allObjects []objectInfo
+		for name, typ := range objectSet {
+			allObjects = append(allObjects, objectInfo{Name: name, Type: typ})
+		}
+		sort.Slice(allObjects, func(i, j int) bool { return allObjects[i].Name < allObjects[j].Name })
+		report := generateHTMLReportAllObjects(allObjects, fileNames, c.Driver.MigrationDir())
+		reportPath := filepath.Join(".", fmt.Sprintf("history_all_%d.html", time.Now().Unix()))
+		if err := os.WriteFile(reportPath, []byte(report), 0644); err != nil {
+			return fmt.Errorf("failed to write HTML report: %w", err)
+		}
+		fmt.Printf("History report generated: %s\n", reportPath)
+		return nil
+	}
+
+	objectName = strings.ToLower(objectName)
+	files, err = os.ReadDir(c.Driver.MigrationDir())
 	if err != nil {
 		return fmt.Errorf("failed to read migration directory: %w", err)
 	}
@@ -71,15 +132,16 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	var finalTrigger *CreateTrigger
 	var finalProcedure *CreateProcedure
 
-	var fileNames []string
+	var fileNames2 []string
 	for _, f := range files {
 		if !f.IsDir() && strings.HasSuffix(f.Name(), ".bcl") {
-			fileNames = append(fileNames, f.Name())
+			fileNames2 = append(fileNames2, f.Name())
 		}
 	}
-	sort.Strings(fileNames)
+	sort.Strings(fileNames2)
 
-	for _, fname := range fileNames {
+	// Collect changes for the specified object
+	for _, fname := range fileNames2 {
 		path := filepath.Join(c.Driver.MigrationDir(), fname)
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -331,7 +393,7 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 		migrationMap[key].Actions = append(migrationMap[key].Actions, ch)
 	}
 
-	report := generateHTMLReportAccordion(objectName, migrationMap, migrationOrder, finalTable, finalView, finalFunction, finalProcedure, finalTrigger)
+	report := generateHTMLReportAccordion2Col(objectName, migrationMap, migrationOrder, finalTable, finalView, finalFunction, finalProcedure, finalTrigger)
 	reportPath := filepath.Join(".", fmt.Sprintf("history_%s_%d.html", objectName, time.Now().Unix()))
 	if err := os.WriteFile(reportPath, []byte(report), 0644); err != nil {
 		return fmt.Errorf("failed to write HTML report: %w", err)
@@ -561,6 +623,548 @@ document.querySelectorAll('.accordion-header').forEach(function(header) {
 		acc.classList.toggle('active');
 	});
 });
+</script>
+</body>
+</html>`
+	return html
+}
+
+// 2-column layout for single object
+func generateHTMLReportAccordion2Col(
+	objectName string,
+	migrationMap map[string]*MigrationGroup,
+	migrationOrder []string,
+	finalTable *CreateTable,
+	finalView *CreateView,
+	finalFunction *CreateFunction,
+	finalProcedure *CreateProcedure,
+	finalTrigger *CreateTrigger,
+) string {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>History Report - ` + objectName + `</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; background: #f8f9fa; }
+h1 { color: #333; }
+.main-container { display: flex; flex-direction: row; height: 100vh; }
+.history-col { flex: 1.2; padding: 2em; overflow-y: auto; border-right: 1px solid #eee; background: #f8f9fa; }
+.structure-col { flex: 1; padding: 2em; overflow-y: auto; background: #fff; }
+.accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
+.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; font-weight: bold; }
+.accordion-content { display: none; padding: 1em; }
+.accordion.active .accordion-content { display: block; }
+.accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
+.accordion.active .accordion-header:after { transform: rotate(-180deg); }
+.event { margin-bottom: 1.5em; }
+.event .op { font-weight: bold; color: #007bff; }
+.event .details { margin-bottom: 0.5em; }
+.event .migration { color: #888; font-size: 0.95em; }
+.final-structure { background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 8px; }
+th, td { padding: 0.5em 1em; border-bottom: 1px solid #eee; }
+ul { margin: 0; padding-left: 1.2em; }
+pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="main-container">
+<div class="history-col">
+<h1>History: ` + objectName + `</h1>
+<div id="history-accordion">`
+
+	for idx, key := range migrationOrder {
+		group := migrationMap[key]
+		html += `<div class="accordion` + func() string {
+			if idx == 0 {
+				return " active"
+			}
+			return ""
+		}() + `">
+  <div class="accordion-header">` + group.Date.Format(time.RFC1123) + ` &mdash; Migration: <b>` + group.MigrationName + `</b></div>
+  <div class="accordion-content">`
+		for _, ch := range group.Actions {
+			html += `<div class="event">
+  <div class="op">` + ch.Operation + `</div>
+  <div class="details">` + ch.Details + `</div>
+</div>
+`
+		}
+		html += `</div></div>`
+	}
+
+	html += `</div>
+</div>
+<div class="structure-col">
+<h2>Final Structure</h2>
+<div class="final-structure">`
+	switch {
+	case finalTable != nil:
+		html += `<table><tr><th>Column</th><th>Type</th><th>PK</th><th>AI</th><th>Unique</th><th>Index</th><th>Nullable</th><th>Default</th><th>Check</th></tr>`
+		for _, col := range finalTable.Columns {
+			html += `<tr><td>` + col.Name + `</td><td>` + col.Type + `</td><td>` + boolStr(col.PrimaryKey) + `</td><td>` + boolStr(col.AutoIncrement) + `</td><td>` + boolStr(col.Unique) + `</td><td>` + boolStr(col.Index) + `</td><td>` + boolStr(col.Nullable) + `</td><td>` + fmt.Sprintf("%v", col.Default) + `</td><td>` + col.Check + `</td></tr>`
+		}
+		html += `</table>`
+	case finalView != nil:
+		html += describeView(*finalView)
+	case finalFunction != nil:
+		html += describeFunction(*finalFunction)
+	case finalProcedure != nil:
+		html += describeProcedure(*finalProcedure)
+	case finalTrigger != nil:
+		html += describeTrigger(*finalTrigger)
+	default:
+		html += `<b>Object does not exist (dropped).</b>`
+	}
+	html += `</div>
+</div>
+</div>
+<script>
+document.querySelectorAll('.accordion-header').forEach(function(header) {
+	header.addEventListener('click', function() {
+		var acc = header.parentElement;
+		acc.classList.toggle('active');
+	});
+});
+</script>
+</body>
+</html>`
+	return html
+}
+
+// 3-column layout for all objects
+func generateHTMLReportAllObjects(
+	allObjects []objectInfo,
+	fileNames []string,
+	migrationDir string,
+) string {
+	// Prepare per-object history and structure
+	type ObjectReport struct {
+		Name          string
+		Type          string
+		HistoryHTML   string
+		StructureHTML string
+	}
+	reports := make(map[string]ObjectReport)
+	for _, obj := range allObjects {
+		// Collect changes and structure for each object
+		var changes []MigrationChange
+		var finalTable *CreateTable
+		var dropped bool
+		var finalView *CreateView
+		var finalFunction *CreateFunction
+		var finalTrigger *CreateTrigger
+		var finalProcedure *CreateProcedure
+
+		for _, fname := range fileNames {
+			path := filepath.Join(migrationDir, fname)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var cfg Config
+			if _, err := bcl.Unmarshal(data, &cfg); err != nil {
+				continue
+			}
+			m := cfg.Migration
+			createdAt := extractTimeFromFilename(fname)
+
+			// TABLES
+			for _, ct := range m.Up.CreateTable {
+				if strings.EqualFold(ct.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "CreateTable",
+						Details:       describeTableColumns(ct.Columns, ct.PrimaryKey),
+					})
+					cpy := ct
+					finalTable = &cpy
+					dropped = false
+				}
+			}
+			for _, at := range m.Up.AlterTable {
+				if strings.EqualFold(at.Name, obj.Name) && finalTable != nil && !dropped {
+					for _, ac := range at.AddColumn {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "AddColumn",
+							Details:       describeColumn(ac),
+						})
+						finalTable.Columns = append(finalTable.Columns, ac)
+					}
+					for _, dc := range at.DropColumn {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "DropColumn",
+							Details:       fmt.Sprintf("Dropped column: <b>%s</b>", dc.Name),
+						})
+						if finalTable != nil {
+							var newCols []AddColumn
+							for _, col := range finalTable.Columns {
+								if col.Name != dc.Name {
+									newCols = append(newCols, col)
+								}
+							}
+							finalTable.Columns = newCols
+						}
+					}
+					for _, rc := range at.RenameColumn {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "RenameColumn",
+							Details:       fmt.Sprintf("Renamed column: <b>%s</b> to <b>%s</b>", rc.From, rc.To),
+						})
+						if finalTable != nil {
+							for i, col := range finalTable.Columns {
+								if col.Name == rc.From {
+									finalTable.Columns[i].Name = rc.To
+								}
+							}
+						}
+					}
+				}
+			}
+			for _, dt := range m.Up.DropTable {
+				if strings.EqualFold(dt.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "DropTable",
+						Details:       "Table dropped",
+					})
+					finalTable = nil
+					dropped = true
+				}
+			}
+			// VIEWS
+			for _, cv := range m.Up.CreateView {
+				if strings.EqualFold(cv.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "CreateView",
+						Details:       describeView(cv),
+					})
+					cpy := cv
+					finalView = &cpy
+				}
+			}
+			for _, dv := range m.Up.DropView {
+				if strings.EqualFold(dv.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "DropView",
+						Details:       "View dropped",
+					})
+					finalView = nil
+				}
+			}
+			for _, rv := range m.Up.RenameView {
+				if strings.EqualFold(rv.OldName, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "RenameView",
+						Details:       fmt.Sprintf("Renamed view: <b>%s</b> to <b>%s</b>", rv.OldName, rv.NewName),
+					})
+					if finalView != nil {
+						finalView.Name = rv.NewName
+					}
+				}
+			}
+			// FUNCTIONS
+			for _, cf := range m.Up.CreateFunction {
+				if strings.EqualFold(cf.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "CreateFunction",
+						Details:       describeFunction(cf),
+					})
+					cpy := cf
+					finalFunction = &cpy
+				}
+			}
+			for _, df := range m.Up.DropFunction {
+				if strings.EqualFold(df.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "DropFunction",
+						Details:       "Function dropped",
+					})
+					finalFunction = nil
+				}
+			}
+			for _, rf := range m.Up.RenameFunction {
+				if strings.EqualFold(rf.OldName, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "RenameFunction",
+						Details:       fmt.Sprintf("Renamed function: <b>%s</b> to <b>%s</b>", rf.OldName, rf.NewName),
+					})
+					if finalFunction != nil {
+						finalFunction.Name = rf.NewName
+					}
+				}
+			}
+			// PROCEDURES
+			for _, cp := range m.Up.CreateProcedure {
+				if strings.EqualFold(cp.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "CreateProcedure",
+						Details:       describeProcedure(cp),
+					})
+					cpy := cp
+					finalProcedure = &cpy
+				}
+			}
+			for _, dp := range m.Up.DropProcedure {
+				if strings.EqualFold(dp.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "DropProcedure",
+						Details:       "Procedure dropped",
+					})
+					finalProcedure = nil
+				}
+			}
+			for _, rp := range m.Up.RenameProcedure {
+				if strings.EqualFold(rp.OldName, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "RenameProcedure",
+						Details:       fmt.Sprintf("Renamed procedure: <b>%s</b> to <b>%s</b>", rp.OldName, rp.NewName),
+					})
+					if finalProcedure != nil {
+						finalProcedure.Name = rp.NewName
+					}
+				}
+			}
+			// TRIGGERS
+			for _, ct := range m.Up.CreateTrigger {
+				if strings.EqualFold(ct.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "CreateTrigger",
+						Details:       describeTrigger(ct),
+					})
+					cpy := ct
+					finalTrigger = &cpy
+				}
+			}
+			for _, dt := range m.Up.DropTrigger {
+				if strings.EqualFold(dt.Name, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "DropTrigger",
+						Details:       "Trigger dropped",
+					})
+					finalTrigger = nil
+				}
+			}
+			for _, rt := range m.Up.RenameTrigger {
+				if strings.EqualFold(rt.OldName, obj.Name) {
+					changes = append(changes, MigrationChange{
+						MigrationName: m.Name,
+						Date:          createdAt,
+						Operation:     "RenameTrigger",
+						Details:       fmt.Sprintf("Renamed trigger: <b>%s</b> to <b>%s</b>", rt.OldName, rt.NewName),
+					})
+					if finalTrigger != nil {
+						finalTrigger.Name = rt.NewName
+					}
+				}
+			}
+		}
+
+		// Group changes by migration (date)
+		migrationMap := make(map[string]*MigrationGroup)
+		var migrationOrder []string
+		for _, ch := range changes {
+			key := ch.Date.Format("20060102150405") + "_" + ch.MigrationName
+			if _, ok := migrationMap[key]; !ok {
+				migrationMap[key] = &MigrationGroup{
+					Date:          ch.Date,
+					MigrationName: ch.MigrationName,
+				}
+				migrationOrder = append(migrationOrder, key)
+			}
+			migrationMap[key].Actions = append(migrationMap[key].Actions, ch)
+		}
+
+		// History HTML
+		historyHTML := `<div id="history-accordion-` + obj.Name + `">`
+		for idx, key := range migrationOrder {
+			group := migrationMap[key]
+			historyHTML += `<div class="accordion` + func() string {
+				if idx == 0 {
+					return " active"
+				}
+				return ""
+			}() + `">
+  <div class="accordion-header">` + group.Date.Format(time.RFC1123) + ` &mdash; Migration: <b>` + group.MigrationName + `</b></div>
+  <div class="accordion-content">`
+			for _, ch := range group.Actions {
+				historyHTML += `<div class="event">
+  <div class="op">` + ch.Operation + `</div>
+  <div class="details">` + ch.Details + `</div>
+</div>
+`
+			}
+			historyHTML += `</div></div>`
+		}
+		historyHTML += `</div>`
+
+		// Structure HTML
+		structureHTML := `<div class="final-structure">`
+		switch obj.Type {
+		case "table":
+			if finalTable != nil {
+				structureHTML += `<table><tr><th>Column</th><th>Type</th><th>PK</th><th>AI</th><th>Unique</th><th>Index</th><th>Nullable</th><th>Default</th><th>Check</th></tr>`
+				for _, col := range finalTable.Columns {
+					structureHTML += `<tr><td>` + col.Name + `</td><td>` + col.Type + `</td><td>` + boolStr(col.PrimaryKey) + `</td><td>` + boolStr(col.AutoIncrement) + `</td><td>` + boolStr(col.Unique) + `</td><td>` + boolStr(col.Index) + `</td><td>` + boolStr(col.Nullable) + `</td><td>` + fmt.Sprintf("%v", col.Default) + `</td><td>` + col.Check + `</td></tr>`
+				}
+				structureHTML += `</table>`
+			} else {
+				structureHTML += `<b>Object does not exist (dropped).</b>`
+			}
+		case "view":
+			if finalView != nil {
+				structureHTML += describeView(*finalView)
+			} else {
+				structureHTML += `<b>Object does not exist (dropped).</b>`
+			}
+		case "function":
+			if finalFunction != nil {
+				structureHTML += describeFunction(*finalFunction)
+			} else {
+				structureHTML += `<b>Object does not exist (dropped).</b>`
+			}
+		case "procedure":
+			if finalProcedure != nil {
+				structureHTML += describeProcedure(*finalProcedure)
+			} else {
+				structureHTML += `<b>Object does not exist (dropped).</b>`
+			}
+		case "trigger":
+			if finalTrigger != nil {
+				structureHTML += describeTrigger(*finalTrigger)
+			} else {
+				structureHTML += `<b>Object does not exist (dropped).</b>`
+			}
+		}
+		structureHTML += `</div>`
+
+		reports[obj.Name] = ObjectReport{
+			Name:          obj.Name,
+			Type:          obj.Type,
+			HistoryHTML:   historyHTML,
+			StructureHTML: structureHTML,
+		}
+	}
+
+	// Build the 3-column layout
+	html := `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>History Report - All Objects</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; background: #f8f9fa; }
+h1 { color: #333; }
+.layout3col { display: flex; flex-direction: row; height: 100vh; }
+.sidebar { width: 260px; background: #222; color: #fff; padding: 0; overflow-y: auto; }
+.sidebar h2 { font-size: 1.2em; margin: 0; padding: 1em 1em 0.5em 1em; color: #fff; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.sidebar li { padding: 0.8em 1em; cursor: pointer; border-bottom: 1px solid #333; }
+.sidebar li.active, .sidebar li:hover { background: #007bff; color: #fff; }
+.main-content { flex: 1; display: flex; flex-direction: row; }
+.history-col { flex: 1.2; padding: 2em; overflow-y: auto; border-right: 1px solid #eee; background: #f8f9fa; }
+.structure-col { flex: 1; padding: 2em; overflow-y: auto; background: #fff; }
+.accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
+.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; font-weight: bold; }
+.accordion-content { display: none; padding: 1em; }
+.accordion.active .accordion-content { display: block; }
+.accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
+.accordion.active .accordion-header:after { transform: rotate(-180deg); }
+.event { margin-bottom: 1.5em; }
+.event .op { font-weight: bold; color: #007bff; }
+.event .details { margin-bottom: 0.5em; }
+.event .migration { color: #888; font-size: 0.95em; }
+.final-structure { background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 8px; }
+th, td { padding: 0.5em 1em; border-bottom: 1px solid #eee; }
+ul { margin: 0; padding-left: 1.2em; }
+pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
+@media (max-width: 900px) {
+	.layout3col { flex-direction: column; }
+	.sidebar { width: 100%; }
+	.main-content { flex-direction: column; }
+	.history-col, .structure-col { padding: 1em; }
+}
+</style>
+</head>
+<body>
+<div class="layout3col">
+	<div class="sidebar">
+		<h2>Objects</h2>
+		<ul id="object-list">`
+	for _, obj := range allObjects {
+		html += `<li data-obj="` + obj.Name + `" class="">` + obj.Name + ` <span style="font-size:0.85em;color:#aaa;">[` + obj.Type + `]</span></li>`
+	}
+	html += `</ul>
+	</div>
+	<div class="main-content">
+		<div class="history-col" id="history-panel"></div>
+		<div class="structure-col" id="structure-panel"></div>
+	</div>
+</div>
+<script>
+var reports = {};`
+	for _, obj := range allObjects {
+		rep := reports[obj.Name]
+		html += `
+reports["` + obj.Name + `"] = {
+	history: ` + "`" + rep.HistoryHTML + "`" + `,
+	structure: ` + "`" + rep.StructureHTML + "`" + `
+};`
+	}
+	html += `
+function selectObject(objName) {
+	document.querySelectorAll('#object-list li').forEach(function(li) {
+		li.classList.remove('active');
+		if (li.getAttribute('data-obj') === objName) li.classList.add('active');
+	});
+	document.getElementById('history-panel').innerHTML = reports[objName].history;
+	document.getElementById('structure-panel').innerHTML = reports[objName].structure;
+	// Activate accordions
+	document.querySelectorAll('.accordion-header').forEach(function(header) {
+		header.addEventListener('click', function() {
+			var acc = header.parentElement;
+			acc.classList.toggle('active');
+		});
+	});
+}
+document.querySelectorAll('#object-list li').forEach(function(li) {
+	li.addEventListener('click', function() {
+		selectObject(li.getAttribute('data-obj'));
+	});
+});
+if (Object.keys(reports).length > 0) {
+	selectObject(Object.keys(reports)[0]);
+}
 </script>
 </body>
 </html>`
