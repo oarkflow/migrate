@@ -461,12 +461,15 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 	return queries, nil
 }
 
-// helper to append non-empty string results from a slice of structs with ToSQL(dialect, tableName)
-func appendNonEmptyQueriesString[T any](queries []string, items []T, fn func(T) (string, error)) ([]string, error) {
-	for _, item := range items {
-		q, err := fn(item)
+type ToSQLWithTable interface {
+	ToSQL(dialect, tableName string) (string, error)
+}
+
+func ParseQueriesWithTable[T ToSQLWithTable](queries []string, dialect string, tableName string, toSQL ...T) ([]string, error) {
+	for _, query := range toSQL {
+		q, err := query.ToSQL(dialect, tableName)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error in ToSQL: %w", err)
 		}
 		if q != "" {
 			queries = append(queries, q)
@@ -493,19 +496,37 @@ func (at AlterTable) ToSQL(dialect string) ([]string, error) {
 		}
 	}
 	var err error
-	queries, err = appendNonEmptyQueriesString(queries, at.DropColumn, func(dc DropColumn) (string, error) {
-		return dc.ToSQL(dialect, at.Name)
-	})
+	queries, err = ParseQueriesWithTable(queries, dialect, at.Name, at.DropColumn...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropColumn: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, at.RenameColumn, func(rc RenameColumn) (string, error) {
-		return rc.ToSQL(dialect, at.Name)
-	})
+	queries, err = ParseQueriesWithTable(queries, dialect, at.Name, at.RenameColumn...)
 	if err != nil {
 		return nil, fmt.Errorf("error in RenameColumn: %w", err)
 	}
 	return queries, nil
+}
+
+type ToSQL interface {
+	ToSQL(dialect string) (string, error)
+}
+
+func ParseQueries[T ToSQL](queries []string, dialect string, toSQL ...T) ([]string, error) {
+	for _, query := range toSQL {
+		q, err := query.ToSQL(dialect)
+		if err != nil {
+			return nil, fmt.Errorf("error in ToSQL: %w", err)
+		}
+		if q != "" {
+			queries = append(queries, q)
+		}
+	}
+	return queries, nil
+}
+
+type toSQLBatch[T ToSQL] struct {
+	name  string
+	items []T
 }
 
 func (op Operation) ToSQL(dialect string) ([]string, error) {
@@ -535,117 +556,79 @@ func (op Operation) ToSQL(dialect string) ([]string, error) {
 		}
 	}
 	var err error
-	queries, err = appendNonEmptyQueriesString(queries, op.DeleteData, func(dd DeleteData) (string, error) {
-		return dd.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DeleteData...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DeleteData: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropEnumType, func(de DropEnumType) (string, error) {
-		return de.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropEnumType...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropEnumType: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropRowPolicy, func(drp DropRowPolicy) (string, error) {
-		return drp.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropRowPolicy...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropRowPolicy: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropMaterializedView, func(dmv DropMaterializedView) (string, error) {
-		return dmv.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropMaterializedView...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropMaterializedView: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropTable, func(dt DropTable) (string, error) {
-		return dt.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropTable...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropTable: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropSchema, func(ds DropSchema) (string, error) {
-		return ds.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropSchema...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropSchema: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.RenameTable, func(rt RenameTable) (string, error) {
-		return rt.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.RenameTable...)
 	if err != nil {
 		return nil, fmt.Errorf("error in RenameTable: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.CreateView, func(cv CreateView) (string, error) {
-		return cv.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.CreateView...)
 	if err != nil {
 		return nil, fmt.Errorf("error in CreateView: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropView, func(dv DropView) (string, error) {
-		return dv.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropView...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropView: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.RenameView, func(rv RenameView) (string, error) {
-		return rv.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.RenameView...)
 	if err != nil {
 		return nil, fmt.Errorf("error in RenameView: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.CreateFunction, func(cf CreateFunction) (string, error) {
-		return cf.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.CreateFunction...)
 	if err != nil {
 		return nil, fmt.Errorf("error in CreateFunction: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropFunction, func(df DropFunction) (string, error) {
-		return df.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropFunction...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropFunction: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.RenameFunction, func(rf RenameFunction) (string, error) {
-		return rf.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.RenameFunction...)
 	if err != nil {
 		return nil, fmt.Errorf("error in RenameFunction: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.CreateProcedure, func(cp CreateProcedure) (string, error) {
-		return cp.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.CreateProcedure...)
 	if err != nil {
 		return nil, fmt.Errorf("error in CreateProcedure: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropProcedure, func(dp DropProcedure) (string, error) {
-		return dp.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropProcedure...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropProcedure: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.RenameProcedure, func(rp RenameProcedure) (string, error) {
-		return rp.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.RenameProcedure...)
 	if err != nil {
 		return nil, fmt.Errorf("error in RenameProcedure: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.CreateTrigger, func(ct CreateTrigger) (string, error) {
-		return ct.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.CreateTrigger...)
 	if err != nil {
 		return nil, fmt.Errorf("error in CreateTrigger: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.DropTrigger, func(dt DropTrigger) (string, error) {
-		return dt.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.DropTrigger...)
 	if err != nil {
 		return nil, fmt.Errorf("error in DropTrigger: %w", err)
 	}
-	queries, err = appendNonEmptyQueriesString(queries, op.RenameTrigger, func(rt RenameTrigger) (string, error) {
-		return rt.ToSQL(dialect)
-	})
+	queries, err = ParseQueries(queries, dialect, op.RenameTrigger...)
 	if err != nil {
 		return nil, fmt.Errorf("error in RenameTrigger: %w", err)
 	}
