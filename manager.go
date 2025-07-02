@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	
+
 	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/console"
@@ -103,7 +103,7 @@ func defaultManager(client contracts.Cli) *Manager {
 }
 
 func NewManager(opts ...ManagerOption) *Manager {
-	
+
 	cli.SetName(Name)
 	cli.SetVersion(Version)
 	app := cli.New()
@@ -127,6 +127,7 @@ func NewManager(opts ...ManagerOption) *Manager {
 		&ValidateCommand{Driver: m},
 		&SeedCommand{Driver: m},
 		&MakeSeedCommand{Driver: m},
+		&HistoryCommand{Driver: m}, // <-- Register the new command
 	})
 	return m
 }
@@ -269,12 +270,12 @@ func (d *Manager) RollbackMigration(step int) error {
 
 func (d *Manager) ResetMigrations() error {
 	logger.Info().Msg("Resetting migrations...")
-	
+
 	histories, err := d.historyDriver.Load()
 	if err != nil {
 		return err
 	}
-	
+
 	for i := len(histories) - 1; i >= 0; i-- {
 		name := histories[i].Name
 		path := filepath.Join(d.migrationDir, name+".bcl")
@@ -300,7 +301,7 @@ func (d *Manager) ResetMigrations() error {
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
 	}
-	
+
 	if fh, ok := d.historyDriver.(*FileHistoryDriver); ok {
 		return os.WriteFile(fh.filePath, []byte("[]"), 0644)
 	}
@@ -316,7 +317,7 @@ func (d *Manager) ValidateMigrations() error {
 	if err != nil {
 		return err
 	}
-	
+
 	applied := make(map[string]bool)
 	for _, h := range histories {
 		applied[h.Name] = true
@@ -398,7 +399,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, viewName, viewName, viewName)
 			case "function":
-				
+
 				funcName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -531,7 +532,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, triggerName, triggerName)
 			default:
-				
+
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -600,7 +601,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, triggerName, triggerName)
 			default:
-				
+
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -668,7 +669,7 @@ func releaseLock() error {
 func runPreUpChecks(checks []string) error {
 	for _, check := range checks {
 		logger.Printf("Executing PreUpCheck: %s", check)
-		
+
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PreUp check failed: %s", check)
 		}
@@ -680,7 +681,7 @@ func runPreUpChecks(checks []string) error {
 func runPostUpChecks(checks []string) error {
 	for _, check := range checks {
 		logger.Printf("Executing PostUpCheck: %s", check)
-		
+
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PostUp check failed: %s", check)
 		}
