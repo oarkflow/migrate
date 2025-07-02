@@ -19,7 +19,5 @@ func main() {
 	if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 		log.Fatalf("Failed to unmarshal migration file: %v", err)
 	}
-	for _, c := range cfg.Seeds {
-		fmt.Println(c.ToSQL("postgres"))
-	}
+	fmt.Println(cfg.Seed.ToSQL("postgres"))
 }

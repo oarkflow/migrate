@@ -11,7 +11,7 @@ import (
 )
 
 type SeedConfig struct {
-	Seeds []SeedDefinition `json:"Seed"`
+	Seed SeedDefinition `json:"Seed"`
 }
 
 type SeedDefinition struct {
@@ -31,7 +31,12 @@ type FieldDefinition struct {
 	DataType string `json:"data_type"`
 }
 
-func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
+type InsertQuery struct {
+	SQL  string
+	Args any
+}
+
+func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 	mutate := func(val string) string {
 		if strings.HasPrefix(val, "fake_") {
 			fn, ok := bcl.LookupFunction(val)
@@ -66,7 +71,7 @@ func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
 		}
 		return deps
 	}
-	var queries []string
+	var queries []InsertQuery
 	for i := 0; i < s.Rows; i++ {
 		var cols []string
 		var vals []any
@@ -158,39 +163,34 @@ func (s SeedDefinition) ToSQL(dialect string) ([]string, error) {
 		for _, field := range s.Fields {
 			cols = append(cols, field.Name)
 			val := rowValues[field.Name]
-			evaluated := fmt.Sprintf("%v", val)
+			var arg any = val
 			if field.DataType != "" {
 				dt := strings.ToLower(field.DataType)
 				switch dt {
-				case "string", "varchar", "char", "text":
-					if !(strings.HasPrefix(evaluated, "'") && strings.HasSuffix(evaluated, "'")) {
-						evaluated = fmt.Sprintf("'%s'", evaluated)
-					}
 				case "boolean", "bool":
-					b, err := strconv.ParseBool(evaluated)
-					if err == nil {
-						evaluated = fmt.Sprintf("%t", b)
-					} else {
-						evaluated = strings.ToLower(evaluated)
+					switch v := val.(type) {
+					case string:
+						b, err := strconv.ParseBool(v)
+						if err == nil {
+							arg = b
+						}
 					}
 				case "int", "integer", "number":
-					if strings.HasPrefix(evaluated, "'") && strings.HasSuffix(evaluated, "'") {
-						evaluated = strings.Trim(evaluated, "'")
-					}
-					if eval, err := strconv.Atoi(evaluated); err != nil {
-						return nil, fmt.Errorf("invalid integer value for field '%s': %s", field.Name, evaluated)
-					} else {
-						evaluated = fmt.Sprintf("%d", eval)
+					switch v := val.(type) {
+					case string:
+						if eval, err := strconv.Atoi(v); err == nil {
+							arg = eval
+						}
 					}
 				}
 			}
-			vals = append(vals, evaluated)
+			vals = append(vals, arg)
 		}
-		q, err := dial.InsertSQL(s.Table, cols, vals)
+		q, qargs, err := dial.InsertSQL(s.Table, cols, vals)
 		if err != nil {
 			return nil, err
 		}
-		queries = append(queries, q)
+		queries = append(queries, InsertQuery{SQL: q, Args: qargs})
 	}
 	return queries, nil
 }

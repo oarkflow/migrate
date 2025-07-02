@@ -162,11 +162,11 @@ func (d *DatabaseHistoryDriver) Save(history MigrationHistory) error {
 	dial := GetDialect(d.dialect)
 	cols := []string{"name", "version", "description", "checksum", "applied_at"}
 	vals := []any{history.Name, history.Version, history.Description, history.Checksum, history.AppliedAt.Format(time.RFC3339)}
-	query, err := dial.InsertSQL(d.table, cols, vals)
+	query, args, err := dial.InsertSQL(d.table, cols, vals)
 	if err != nil {
 		return err
 	}
-	_, err = d.db.Exec(query)
+	_, err = d.db.NamedExec(query, args)
 	return err
 }
 

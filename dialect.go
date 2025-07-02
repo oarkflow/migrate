@@ -27,7 +27,7 @@ type Dialect interface {
 	RenameTriggerSQL(rt RenameTrigger) (string, error)
 	WrapInTransaction(queries []string) []string
 	WrapInTransactionWithConfig(queries []string, trans Transaction) []string
-	InsertSQL(table string, columns []string, values []any) (string, error)
+	InsertSQL(table string, columns []string, values []any) (string, any, error)
 	TableExistsSQL(table string) string
 	EOS() string
 }

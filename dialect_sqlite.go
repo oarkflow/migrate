@@ -250,36 +250,20 @@ func (s *SQLiteDialect) EOS() string {
 	return ";"
 }
 
-func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) (string, error) {
+func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) (string, any, error) {
 	var quotedCols []string
-	for _, col := range columns {
+	argMap := make(map[string]any)
+	var namedParams []string
+	for i, col := range columns {
 		quotedCols = append(quotedCols, s.quoteIdentifier(col))
-	}
-	var quotedVals []string
-	for _, val := range values {
-		switch v := val.(type) {
-		case string:
-			if v == "true" || v == "false" {
-				quotedVals = append(quotedVals, v)
-				continue
-			}
-			if IsInteger(v) {
-				quotedVals = append(quotedVals, v)
-				continue
-			}
-			if !(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
-				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
-			}
-		case nil:
-			quotedVals = append(quotedVals, "NULL")
-		default:
-			quotedVals = append(quotedVals, fmt.Sprintf("%v", v))
-		}
+		paramName := ":" + col
+		namedParams = append(namedParams, paramName)
+		argMap[col] = values[i]
 	}
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
 		s.quoteIdentifier(table),
 		strings.Join(quotedCols, ", "),
-		strings.Join(quotedVals, ", "),
+		strings.Join(namedParams, ", "),
 	)
-	return query, nil
+	return query, argMap, nil
 }

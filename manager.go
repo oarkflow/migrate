@@ -53,7 +53,7 @@ type Manager struct {
 	client        contracts.Cli
 	dbDriver      IDatabaseDriver
 	historyDriver HistoryDriver
-	Verbose       bool // <-- new field added for verbose mode
+	Verbose       bool
 }
 
 type ManagerOption func(*Manager)
@@ -331,7 +331,8 @@ func (d *Manager) CreateMigrationFile(name string) error {
 		}
 		switch op {
 		case "create":
-			if objType == "view" {
+			switch objType {
+			case "view":
 				viewName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -348,7 +349,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     }
   }
 }`, name, viewName, viewName, viewName)
-			} else if objType == "function" {
+			case "function":
 
 				funcName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
@@ -366,7 +367,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     }
   }
 }`, name, funcName, funcName, funcName)
-			} else if objType == "trigger" {
+			case "trigger":
 				triggerName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -383,7 +384,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     }
   }
 }`, name, triggerName, triggerName, triggerName)
-			} else {
+			default:
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -435,7 +436,8 @@ func (d *Manager) CreateMigrationFile(name string) error {
 `, name, table, table, table)
 			}
 		case "alter":
-			if objType == "view" {
+			switch objType {
+			case "view":
 				viewName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -450,7 +452,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     # Define rollback for view alterations.
   }
 }`, name, viewName, viewName)
-			} else if objType == "function" {
+			case "function":
 				funcName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -465,7 +467,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     # Define rollback for function alterations.
   }
 }`, name, funcName, funcName)
-			} else if objType == "trigger" {
+			case "trigger":
 				triggerName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -480,7 +482,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     # Define rollback for trigger alterations.
   }
 }`, name, triggerName, triggerName)
-			} else {
+			default:
 
 				var table string
 				if objType == "table" {
@@ -503,7 +505,8 @@ func (d *Manager) CreateMigrationFile(name string) error {
 }`, name, table, table)
 			}
 		case "drop":
-			if objType == "view" {
+			switch objType {
+			case "view":
 				viewName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -518,7 +521,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     # Optionally define rollback for view drop.
   }
 }`, name, viewName, viewName)
-			} else if objType == "function" {
+			case "function":
 				funcName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -533,7 +536,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     # Optionally define rollback for function drop.
   }
 }`, name, funcName, funcName)
-			} else if objType == "trigger" {
+			case "trigger":
 				triggerName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -548,7 +551,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
     # Optionally define rollback for trigger drop.
   }
 }`, name, triggerName, triggerName)
-			} else {
+			default:
 
 				var table string
 				if objType == "table" {
@@ -698,7 +701,7 @@ func runPostUpChecks(checks []string) error {
 
 func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	// Set verbose flag on Manager if -v is passed
-	verbose := ctx.Option("v") != ""
+	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
 	if mgr, ok := c.Driver.(*Manager); ok {
 		mgr.Verbose = verbose
 	}
@@ -783,7 +786,7 @@ func (c *RollbackCommand) Extend() contracts.Extend {
 }
 
 func (c *RollbackCommand) Handle(ctx contracts.Context) error {
-	verbose := ctx.Option("v") != ""
+	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
 	if mgr, ok := c.Driver.(*Manager); ok {
 		mgr.Verbose = verbose
 	}
