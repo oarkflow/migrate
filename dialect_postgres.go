@@ -305,7 +305,7 @@ func IsInteger(s string) bool {
 	return err == nil
 }
 
-func (p *PostgresDialect) InsertSQL(table string, columns []string, values []any) (string, any, error) {
+func (p *PostgresDialect) InsertSQL(table string, columns []string, values []any) (string, map[string]any, error) {
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string

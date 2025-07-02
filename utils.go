@@ -144,7 +144,10 @@ func init() {
 		return f.Bool(), nil
 	})
 	bcl.RegisterFunction("fake_int", func(args ...any) (any, error) {
-		return f.Int64(), nil
+		return f.Int8(), nil
+	})
+	bcl.RegisterFunction("fake_uint", func(args ...any) (any, error) {
+		return f.Uint8(), nil
 	})
 	bcl.RegisterFunction("fake_float32", func(args ...any) (any, error) {
 		return f.Float32(), nil

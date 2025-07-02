@@ -250,7 +250,7 @@ func (s *SQLiteDialect) EOS() string {
 	return ";"
 }
 
-func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) (string, any, error) {
+func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) (string, map[string]any, error) {
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string

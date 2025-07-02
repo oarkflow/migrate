@@ -252,7 +252,7 @@ func (m *MySQLDialect) RenameTriggerSQL(rt RenameTrigger) (string, error) {
 	return "", errors.New("RENAME TRIGGER is not supported in this MySQL dialect implementation")
 }
 
-func (m *MySQLDialect) InsertSQL(table string, columns []string, values []any) (string, any, error) {
+func (m *MySQLDialect) InsertSQL(table string, columns []string, values []any) (string, map[string]any, error) {
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string

@@ -34,21 +34,26 @@ var logger = log.Logger{
 }
 
 type IDatabaseDriver interface {
-	ApplySQL(queries []string) error
+	ApplySQL(queries []string, args ...any) error
 	DB() *squealx.DB
 }
 
 type IManager interface {
+	MigrationDir() string
+	SeedDir() string
 	ApplyMigration(m Migration) error
 	RollbackMigration(step int) error
 	ResetMigrations() error
 	ValidateMigrations() error
 	CreateMigrationFile(name string) error
+	CreateSeedFile(name string) error
 	ValidateHistoryStorage() error
+	RunSeeds(truncate bool, seedFile ...string) error
 }
 
 type Manager struct {
 	migrationDir  string
+	seedDir       string
 	dialect       string
 	client        contracts.Cli
 	dbDriver      IDatabaseDriver
@@ -61,6 +66,12 @@ type ManagerOption func(*Manager)
 func WithMigrationDir(dir string) ManagerOption {
 	return func(m *Manager) {
 		m.migrationDir = dir
+	}
+}
+
+func WithSeedDir(dir string) ManagerOption {
+	return func(m *Manager) {
+		m.seedDir = dir
 	}
 }
 
@@ -85,6 +96,7 @@ func WithDialect(dialect string) ManagerOption {
 func defaultManager(client contracts.Cli) *Manager {
 	return &Manager{
 		migrationDir:  "migrations",
+		seedDir:       "migrations/seeds",
 		dialect:       "postgres",
 		historyDriver: NewFileHistoryDriver("migration_history.txt"),
 		client:        client,
@@ -92,10 +104,7 @@ func defaultManager(client contracts.Cli) *Manager {
 }
 
 func NewManager(opts ...ManagerOption) *Manager {
-	dir := "migrations"
-	if err := os.MkdirAll(dir, fs.ModePerm); err != nil {
-		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
-	}
+
 	cli.SetName(Name)
 	cli.SetVersion(Version)
 	app := cli.New()
@@ -104,6 +113,12 @@ func NewManager(opts ...ManagerOption) *Manager {
 	for _, opt := range opts {
 		opt(m)
 	}
+	if err := os.MkdirAll(m.migrationDir, fs.ModePerm); err != nil {
+		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
+	}
+	if err := os.MkdirAll(m.seedDir, fs.ModePerm); err != nil {
+		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
+	}
 	client.Register([]contracts.Command{
 		console.NewListCommand(client),
 		&MakeMigrationCommand{Driver: m},
@@ -111,6 +126,8 @@ func NewManager(opts ...ManagerOption) *Manager {
 		&RollbackCommand{Driver: m},
 		&ResetCommand{Driver: m},
 		&ValidateCommand{Driver: m},
+		&SeedCommand{Driver: m},
+		&MakeSeedCommand{Driver: m},
 	})
 	return m
 }
@@ -125,6 +142,14 @@ func (d *Manager) SetDialect(dialect string) {
 
 func (d *Manager) GetDialect() string {
 	return d.dialect
+}
+
+func (d *Manager) MigrationDir() string {
+	return d.migrationDir
+}
+
+func (d *Manager) SeedDir() string {
+	return d.seedDir
 }
 
 func (d *Manager) ValidateHistoryStorage() error {
@@ -313,6 +338,28 @@ func (d *Manager) ValidateMigrations() error {
 	return nil
 }
 
+func (d *Manager) CreateSeedFile(name string) error {
+	tableName := strings.TrimSuffix(strings.TrimPrefix(name, "seed_"), ".bcl")
+	name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
+	filename := filepath.Join(d.seedDir, name+".bcl")
+	template := fmt.Sprintf(`Seed "%s" {
+    table = "%s"
+    Field "id" {
+        value = "fake_uuid"
+        unique = true
+    }
+    Field "is_active" {
+        value = true
+    }
+	rows = 2
+}`, name, tableName)
+	if err := os.WriteFile(filename, []byte(template), 0644); err != nil {
+		return fmt.Errorf("failed to create seed file: %w", err)
+	}
+	logger.Printf("Seed file created: %s", filename)
+	return nil
+}
+
 func (d *Manager) CreateMigrationFile(name string) error {
 	name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
 	filename := filepath.Join(d.migrationDir, name+".bcl")
@@ -423,7 +470,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
       }
       Column "deleted_at" {
         type = "datetime"
-        is_nullable = true
+        nullable = true
       }
     }
   }
@@ -631,6 +678,39 @@ func (c *MakeMigrationCommand) Handle(ctx contracts.Context) error {
 	return c.Driver.CreateMigrationFile(name)
 }
 
+type MakeSeedCommand struct {
+	Driver IManager
+}
+
+func (c *MakeSeedCommand) Signature() string {
+	return "make:seed"
+}
+
+func (c *MakeSeedCommand) Description() string {
+	return "Creates a new seed file for table in the designated directory."
+}
+
+func (c *MakeSeedCommand) Extend() contracts.Extend {
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable verbose output",
+				Value:   "false",
+			},
+		},
+	}
+}
+
+func (c *MakeSeedCommand) Handle(ctx contracts.Context) error {
+	name := ctx.Argument(0)
+	if name == "" {
+		return errors.New("seed name is required")
+	}
+	return c.Driver.CreateSeedFile(name)
+}
+
 type MigrateCommand struct {
 	Driver IManager
 }
@@ -719,7 +799,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	if err := c.Driver.ValidateMigrations(); err != nil {
 		logger.Printf("Validation warning: %v", err)
 	}
-	files, err := os.ReadDir("migrations")
+	files, err := os.ReadDir(c.Driver.MigrationDir())
 	if err != nil {
 		return fmt.Errorf("failed to read migration directory: %w", err)
 	}
@@ -728,7 +808,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			continue
 		}
 		name := strings.TrimSuffix(file.Name(), ".bcl")
-		path := filepath.Join("migrations", file.Name())
+		path := filepath.Join(c.Driver.MigrationDir(), file.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", name, err)
@@ -858,4 +938,113 @@ func (c *ValidateCommand) Extend() contracts.Extend {
 
 func (c *ValidateCommand) Handle(ctx contracts.Context) error {
 	return c.Driver.ValidateMigrations()
+}
+
+type SeedCommand struct {
+	Driver IManager
+}
+
+func (c *SeedCommand) Signature() string {
+	return "db:seed"
+}
+
+func (c *SeedCommand) Description() string {
+	return "Run database seeds from a seed file."
+}
+
+func (c *SeedCommand) Extend() contracts.Extend {
+	return contracts.Extend{
+		Flags: []contracts.Flag{
+			{
+				Name:    "file",
+				Aliases: []string{"f"},
+				Usage:   "Seed file to run",
+				Value:   "",
+			},
+			{
+				Name:    "truncate",
+				Aliases: []string{"t"},
+				Usage:   "Truncate tables before seeding",
+				Value:   "false",
+			},
+		},
+	}
+}
+
+func (c *SeedCommand) Handle(ctx contracts.Context) error {
+	var files []string
+	seedFile := ctx.Option("file")
+	truncateOption := ctx.Option("truncate")
+	truncate := truncateOption == "true" || truncateOption == "1"
+	if seedFile != "" {
+		files = append(files, seedFile)
+	} else {
+		osFiles, _ := os.ReadDir(c.Driver.SeedDir())
+		for _, file := range osFiles {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".bcl") {
+				files = append(files, filepath.Join(c.Driver.SeedDir(), file.Name()))
+			}
+		}
+	}
+	if len(files) == 0 {
+		logger.Printf("No seed files found in %s", c.Driver.SeedDir())
+		return nil
+	}
+	return c.Driver.RunSeeds(truncate, files...)
+}
+
+func (d *Manager) RunSeeds(truncate bool, seedFiles ...string) error {
+	for _, seedFile := range seedFiles {
+		data, err := os.ReadFile(seedFile)
+		if err != nil {
+			return fmt.Errorf("failed to read seed file: %w", err)
+		}
+		var cfg SeedConfig
+		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("failed to unmarshal seed file: %w", err)
+		}
+		queries, err := cfg.Seed.ToSQL(d.dialect)
+		if err != nil {
+			return fmt.Errorf("failed to generate seed SQL: %w", err)
+		}
+		if d.dbDriver == nil {
+			return fmt.Errorf("no database driver configured")
+		}
+		if truncate {
+			query := getTruncateSQL(d.dialect, cfg.Seed.Table)
+			if query != "" {
+				logger.Info().Msgf("Truncating table: %s", cfg.Seed.Table)
+				if d.Verbose {
+					logger.Info().Msgf("Truncate SQL: %s", query)
+				}
+				err := d.dbDriver.ApplySQL([]string{query})
+				if err != nil {
+					return fmt.Errorf("failed to truncate table %s: %w", cfg.Seed.Table, err)
+				}
+			} else {
+				return fmt.Errorf("unsupported dialect for truncation: %s", d.dialect)
+			}
+		}
+		logger.Info().Msgf("Seeding table: %s", cfg.Seed.Table)
+		for _, q := range queries {
+			logger.Info().Msgf("Seed SQL: %s", q.SQL)
+			err := d.dbDriver.ApplySQL([]string{q.SQL}, q.Args)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func getTruncateSQL(dialect string, table string) string {
+	switch dialect {
+	case "mysql", "mariadb":
+		return fmt.Sprintf("TRUNCATE TABLE `%s`;", table)
+	case "postgres", "cockroachdb":
+		return fmt.Sprintf("TRUNCATE TABLE \"%s\" RESTART IDENTITY CASCADE;", table)
+	case "sqlite", "sqlite3":
+		return fmt.Sprintf("DELETE FROM `%s`;", table)
+	}
+	return ""
 }

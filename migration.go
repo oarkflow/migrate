@@ -595,15 +595,15 @@ func (m Migration) ToSQL(dialect string, up bool) ([]string, error) {
 }
 
 // RunSeeds executes the seed SQL statements for a given SeedDefinition.
-// In a full implementation the queries would be run against the DB.
-func RunSeeds(seed SeedDefinition, dialect string) error {
+func RunSeeds(seed SeedDefinition, dialect string, dbDriver IDatabaseDriver) error {
 	queries, err := seed.ToSQL(dialect)
 	if err != nil {
 		return err
 	}
-	// Execute each query (here we simply print them as a placeholder).
 	for _, q := range queries {
-		fmt.Println(q) // ...replace with actual DB execution
+		if err := dbDriver.ApplySQL([]string{q.SQL}, q.Args); err != nil {
+			return fmt.Errorf("failed to apply seed: %w", err)
+		}
 	}
 	return nil
 }

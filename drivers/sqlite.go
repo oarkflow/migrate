@@ -23,11 +23,7 @@ func NewSQLiteDriver(dbPath string) (*SQLiteDriver, error) {
 	return &SQLiteDriver{db: db}, nil
 }
 
-func (s *SQLiteDriver) ApplySQL(migrations []string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
+func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 	for _, query := range migrations {
 		queries := strings.Split(query, ";")
 		for _, q := range queries {
@@ -35,14 +31,16 @@ func (s *SQLiteDriver) ApplySQL(migrations []string) error {
 			if q == "" {
 				continue
 			}
-			if _, err := tx.Exec(q); err != nil {
-				tx.Rollback()
-				return fmt.Errorf("failed to execute query [%s]: %w", query, err)
+			if len(args) > 0 {
+				if _, err := s.db.NamedExec(q, args[0]); err != nil {
+					return fmt.Errorf("failed to execute query [%s]: %w", query, err)
+				}
+			} else {
+				if _, err := s.db.Exec(q); err != nil {
+					return fmt.Errorf("failed to execute query [%s]: %w", query, err)
+				}
 			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil
 }

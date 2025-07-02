@@ -19,5 +19,12 @@ func main() {
 	if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 		log.Fatalf("Failed to unmarshal migration file: %v", err)
 	}
-	fmt.Println(cfg.Seed.ToSQL("postgres"))
+	queries, err := cfg.Seed.ToSQL("postgres")
+	if err != nil {
+		log.Fatalf("Failed to generate seed SQL: %v", err)
+	}
+	for _, q := range queries {
+		fmt.Println(q.SQL)
+		// Here you could execute the SQL using your DB driver
+	}
 }

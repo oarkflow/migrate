@@ -33,7 +33,36 @@ type FieldDefinition struct {
 
 type InsertQuery struct {
 	SQL  string
-	Args any
+	Args map[string]any
+}
+
+type SeedHistory struct {
+	Name      string `json:"name"`
+	AppliedAt string `json:"applied_at"`
+}
+
+func convertSeedValue(val any, dataType string) any {
+	switch strings.ToLower(dataType) {
+	case "int", "integer", "number":
+		switch v := val.(type) {
+		case string:
+			if i, err := strconv.Atoi(v); err == nil {
+				return i
+			}
+		case int:
+			return v
+		}
+	case "boolean", "bool":
+		switch v := val.(type) {
+		case string:
+			if b, err := strconv.ParseBool(v); err == nil {
+				return b
+			}
+		case bool:
+			return v
+		}
+	}
+	return val
 }
 
 func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
@@ -72,9 +101,17 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 		return deps
 	}
 	var queries []InsertQuery
+	uniqueSet := make(map[string]map[any]struct{})
+	for _, field := range s.Fields {
+		if field.Unique {
+			if uniqueSet[field.Name] == nil {
+				uniqueSet[field.Name] = make(map[any]struct{})
+			}
+		}
+	}
 	for i := 0; i < s.Rows; i++ {
 		var cols []string
-		var vals []any
+		valMap := make(map[string]any)
 		rowValues := make(map[string]any)
 		exprFields := make(map[string]*FieldDefinition)
 		for idx, field := range s.Fields {
@@ -89,21 +126,34 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 			} else {
 				evaluated = mutate(val)
 			}
-			switch strings.ToLower(field.DataType) {
-			case "int", "integer", "number":
-				if eval, err := strconv.Atoi(evaluated); err == nil {
-					rowValues[field.Name] = eval
-				} else {
-					rowValues[field.Name] = evaluated
+			rowValues[field.Name] = convertSeedValue(evaluated, field.DataType)
+		}
+		// Improved unique constraint enforcement
+		for _, field := range s.Fields {
+			if field.Unique {
+				val := rowValues[field.Name]
+				maxAttempts := 100
+				attempts := 0
+				origVal := fmt.Sprintf("%v", field.Value)
+				for {
+					if _, exists := uniqueSet[field.Name][val]; !exists {
+						break
+					}
+					attempts++
+					if attempts >= maxAttempts {
+						return nil, fmt.Errorf("could not generate unique value for field '%s' after %d attempts", field.Name, maxAttempts)
+					}
+					// Regenerate value using mutate or getRandomValue as appropriate
+					var newVal string
+					if field.Random {
+						newVal = getRandomValue(origVal)
+					} else {
+						newVal = mutate(origVal)
+					}
+					val = convertSeedValue(newVal, field.DataType)
 				}
-			case "boolean", "bool":
-				if eval, err := strconv.ParseBool(evaluated); err == nil {
-					rowValues[field.Name] = eval
-				} else {
-					rowValues[field.Name] = evaluated
-				}
-			default:
-				rowValues[field.Name] = evaluated
+				uniqueSet[field.Name][val] = struct{}{}
+				rowValues[field.Name] = val
 			}
 		}
 		remaining := len(exprFields)
@@ -120,7 +170,7 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 					}
 				}
 				if missing {
-					continue // skip this expr for now
+					continue
 				}
 				ctx := map[string]map[string]any{}
 				for k, v := range rowValues {
@@ -146,7 +196,7 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 				if err != nil {
 					return nil, fmt.Errorf("expr eval error for field '%s': %w", field.Name, err)
 				}
-				rowValues[name] = result
+				rowValues[name] = convertSeedValue(result, field.DataType)
 				delete(exprFields, name)
 				progress = true
 			}
@@ -159,40 +209,25 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 			}
 			remaining = len(exprFields)
 		}
-		// Build columns and values in original order
 		for _, field := range s.Fields {
 			cols = append(cols, field.Name)
-			val := rowValues[field.Name]
-			var arg any = val
-			if field.DataType != "" {
-				dt := strings.ToLower(field.DataType)
-				switch dt {
-				case "boolean", "bool":
-					switch v := val.(type) {
-					case string:
-						b, err := strconv.ParseBool(v)
-						if err == nil {
-							arg = b
-						}
-					}
-				case "int", "integer", "number":
-					switch v := val.(type) {
-					case string:
-						if eval, err := strconv.Atoi(v); err == nil {
-							arg = eval
-						}
-					}
-				}
-			}
-			vals = append(vals, arg)
+			valMap[field.Name] = rowValues[field.Name]
 		}
-		q, qargs, err := dial.InsertSQL(s.Table, cols, vals)
+		q, argMap, err := dial.InsertSQL(s.Table, cols, colsToArgs(cols, valMap))
 		if err != nil {
 			return nil, err
 		}
-		queries = append(queries, InsertQuery{SQL: q, Args: qargs})
+		queries = append(queries, InsertQuery{SQL: q, Args: argMap})
 	}
 	return queries, nil
+}
+
+func colsToArgs(cols []string, valMap map[string]any) []any {
+	args := make([]any, len(cols))
+	for i, col := range cols {
+		args[i] = valMap[col]
+	}
+	return args
 }
 
 func getRandomValue(val string) string {

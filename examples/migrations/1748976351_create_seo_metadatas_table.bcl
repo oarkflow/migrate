@@ -5,11 +5,7 @@ Migration "1748976351_create_seo_metadatas_table" {
   Up {
     CreateTable "seo_metadatas" {
       Column "id" {
-        type = "integer"
-        primary_key = true
-        auto_increment = true
-        index = true
-        unique = true
+        type = "integer", primary_key, auto_increment, index, unique
       }
       Column "is_active" {
         type = "boolean"
@@ -30,7 +26,7 @@ Migration "1748976351_create_seo_metadatas_table" {
       }
       Column "deleted_at" {
         type = "datetime"
-        is_nullable = true
+        nullable = true
       }
     }
   }

@@ -1,5 +1,5 @@
 Seed "extendedTest" {
-    table = "extended.table"
+    table = "seo_metadatas"
     Field "id" {
         value = "fake_uuid"
         unique = true
