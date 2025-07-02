@@ -20,7 +20,7 @@ var tableSchemas = make(map[string]*CreateTable)
 var schemaMutex sync.Mutex
 
 type Config struct {
-	Migrations []Migration `json:"Migration"`
+	Migration Migration `json:"Migration"`
 }
 
 type Migration struct {
@@ -28,8 +28,8 @@ type Migration struct {
 	Version     string        `json:"Version"`
 	Description string        `json:"Description"`
 	Connection  string        `json:"Connection"`
-	Up          []Operation   `json:"Up"`
-	Down        []Operation   `json:"Down"`
+	Up          Operation     `json:"Up"`
+	Down        Operation     `json:"Down"`
 	Transaction []Transaction `json:"Transaction"`
 	Validate    []Validation  `json:"Validate"`
 }
@@ -73,6 +73,12 @@ type CreateTable struct {
 }
 
 func (ct CreateTable) ToSQL(dialect string, up bool) (string, error) {
+	if ct.Name == "" {
+		return "", fmt.Errorf("CreateTable requires a name")
+	}
+	if len(ct.Columns) == 0 {
+		return "", fmt.Errorf("CreateTable requires at least one column")
+	}
 	return GetDialect(dialect).CreateTableSQL(ct, up)
 }
 
@@ -103,6 +109,12 @@ type DropColumn struct {
 }
 
 func (d DropColumn) ToSQL(dialect, tableName string) (string, error) {
+	if tableName == "" {
+		return "", fmt.Errorf("DropColumn requires a table name")
+	}
+	if d.Name == "" {
+		return "", fmt.Errorf("DropColumn requires a column name")
+	}
 	return GetDialect(dialect).DropColumnSQL(d, tableName)
 }
 
@@ -114,6 +126,15 @@ type RenameColumn struct {
 }
 
 func (r RenameColumn) ToSQL(dialect, tableName string) (string, error) {
+	if tableName == "" {
+		return "", fmt.Errorf("RenameColumn requires a table name")
+	}
+	if r.From == "" {
+		return "", fmt.Errorf("RenameColumn requires a 'from' column name")
+	}
+	if r.To == "" {
+		return "", fmt.Errorf("RenameColumn requires a 'to' column name")
+	}
 	return GetDialect(dialect).RenameColumnSQL(r, tableName)
 }
 
@@ -123,6 +144,12 @@ type RenameTable struct {
 }
 
 func (rt RenameTable) ToSQL(dialect string) (string, error) {
+	if rt.OldName == "" {
+		return "", fmt.Errorf("RenameTable requires an old name")
+	}
+	if rt.NewName == "" {
+		return "", fmt.Errorf("RenameTable requires a new name")
+	}
 	return GetDialect(dialect).RenameTableSQL(rt)
 }
 
@@ -132,6 +159,9 @@ type DeleteData struct {
 }
 
 func (d DeleteData) ToSQL(dialect string) (string, error) {
+	if d.Name == "" {
+		return "", fmt.Errorf("DeleteData requires a table name")
+	}
 	return GetDialect(dialect).DeleteDataSQL(d)
 }
 
@@ -141,6 +171,9 @@ type DropEnumType struct {
 }
 
 func (d DropEnumType) ToSQL(dialect string) (string, error) {
+	if d.Name == "" {
+		return "", fmt.Errorf("DropEnumType requires a name")
+	}
 	return GetDialect(dialect).DropEnumTypeSQL(d)
 }
 
@@ -151,6 +184,9 @@ type DropRowPolicy struct {
 }
 
 func (drp DropRowPolicy) ToSQL(dialect string) (string, error) {
+	if drp.Name == "" {
+		return "", fmt.Errorf("DropRowPolicy requires a policy name")
+	}
 	return GetDialect(dialect).DropRowPolicySQL(drp)
 }
 
@@ -160,6 +196,9 @@ type DropMaterializedView struct {
 }
 
 func (dmv DropMaterializedView) ToSQL(dialect string) (string, error) {
+	if dmv.Name == "" {
+		return "", fmt.Errorf("DropMaterializedView requires a name")
+	}
 	return GetDialect(dialect).DropMaterializedViewSQL(dmv)
 }
 
@@ -169,6 +208,9 @@ type DropTable struct {
 }
 
 func (dt DropTable) ToSQL(dialect string) (string, error) {
+	if dt.Name == "" {
+		return "", fmt.Errorf("DropTable requires a table name")
+	}
 	return GetDialect(dialect).DropTableSQL(dt)
 }
 
@@ -179,6 +221,9 @@ type DropSchema struct {
 }
 
 func (ds DropSchema) ToSQL(dialect string) (string, error) {
+	if ds.Name == "" {
+		return "", fmt.Errorf("DropSchema requires a schema name")
+	}
 	return GetDialect(dialect).DropSchemaSQL(ds)
 }
 
@@ -195,6 +240,9 @@ type Validation struct {
 }
 
 func (a AddColumn) ToSQL(dialect, tableName string) ([]string, error) {
+	if tableName == "" {
+		return nil, fmt.Errorf("AddColumn requires a table name")
+	}
 	return GetDialect(dialect).AddColumnSQL(a, tableName)
 }
 
@@ -205,6 +253,9 @@ type CreateView struct {
 }
 
 func (cv CreateView) ToSQL(dialect string) (string, error) {
+	if cv.Name == "" {
+		return "", fmt.Errorf("CreateView requires a name")
+	}
 	return GetDialect(dialect).CreateViewSQL(cv)
 }
 
@@ -215,6 +266,9 @@ type DropView struct {
 }
 
 func (dv DropView) ToSQL(dialect string) (string, error) {
+	if dv.Name == "" {
+		return "", fmt.Errorf("DropView requires a name")
+	}
 	return GetDialect(dialect).DropViewSQL(dv)
 }
 
@@ -224,6 +278,9 @@ type RenameView struct {
 }
 
 func (rv RenameView) ToSQL(dialect string) (string, error) {
+	if rv.OldName == "" {
+		return "", fmt.Errorf("RenameView requires an old name")
+	}
 	return GetDialect(dialect).RenameViewSQL(rv)
 }
 
@@ -234,6 +291,9 @@ type CreateFunction struct {
 }
 
 func (cf CreateFunction) ToSQL(dialect string) (string, error) {
+	if cf.Name == "" {
+		return "", fmt.Errorf("CreateFunction requires a name")
+	}
 	return GetDialect(dialect).CreateFunctionSQL(cf)
 }
 
@@ -244,6 +304,9 @@ type DropFunction struct {
 }
 
 func (df DropFunction) ToSQL(dialect string) (string, error) {
+	if df.Name == "" {
+		return "", fmt.Errorf("DropFunction requires a name")
+	}
 	return GetDialect(dialect).DropFunctionSQL(df)
 }
 
@@ -253,6 +316,12 @@ type RenameFunction struct {
 }
 
 func (rf RenameFunction) ToSQL(dialect string) (string, error) {
+	if rf.OldName == "" {
+		return "", fmt.Errorf("RenameFunction requires an old name")
+	}
+	if rf.NewName == "" {
+		return "", fmt.Errorf("RenameFunction requires a new name")
+	}
 	return GetDialect(dialect).RenameFunctionSQL(rf)
 }
 
@@ -263,6 +332,9 @@ type CreateProcedure struct {
 }
 
 func (cp CreateProcedure) ToSQL(dialect string) (string, error) {
+	if cp.Name == "" {
+		return "", fmt.Errorf("CreateProcedure requires a name")
+	}
 	return GetDialect(dialect).CreateProcedureSQL(cp)
 }
 
@@ -273,6 +345,9 @@ type DropProcedure struct {
 }
 
 func (dp DropProcedure) ToSQL(dialect string) (string, error) {
+	if dp.Name == "" {
+		return "", fmt.Errorf("DropProcedure requires a name")
+	}
 	return GetDialect(dialect).DropProcedureSQL(dp)
 }
 
@@ -282,6 +357,12 @@ type RenameProcedure struct {
 }
 
 func (rp RenameProcedure) ToSQL(dialect string) (string, error) {
+	if rp.OldName == "" {
+		return "", fmt.Errorf("RenameProcedure requires an old name")
+	}
+	if rp.NewName == "" {
+		return "", fmt.Errorf("RenameProcedure requires a new name")
+	}
 	return GetDialect(dialect).RenameProcedureSQL(rp)
 }
 
@@ -292,6 +373,9 @@ type CreateTrigger struct {
 }
 
 func (ct CreateTrigger) ToSQL(dialect string) (string, error) {
+	if ct.Name == "" {
+		return "", fmt.Errorf("CreateTrigger requires a name")
+	}
 	return GetDialect(dialect).CreateTriggerSQL(ct)
 }
 
@@ -302,6 +386,9 @@ type DropTrigger struct {
 }
 
 func (dt DropTrigger) ToSQL(dialect string) (string, error) {
+	if dt.Name == "" {
+		return "", fmt.Errorf("DropTrigger requires a name")
+	}
 	return GetDialect(dialect).DropTriggerSQL(dt)
 }
 
@@ -311,6 +398,12 @@ type RenameTrigger struct {
 }
 
 func (rt RenameTrigger) ToSQL(dialect string) (string, error) {
+	if rt.OldName == "" {
+		return "", fmt.Errorf("RenameTrigger requires an old name")
+	}
+	if rt.NewName == "" {
+		return "", fmt.Errorf("RenameTrigger requires a new name")
+	}
 	return GetDialect(dialect).RenameTriggerSQL(rt)
 }
 
@@ -390,6 +483,9 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 }
 
 func (at AlterTable) ToSQL(dialect string) ([]string, error) {
+	if at.Name == "" {
+		return nil, fmt.Errorf("AlterTable requires a table name")
+	}
 	if dialect == DialectSQLite {
 		return handleSQLiteAlterTable(at)
 	}
@@ -578,19 +674,17 @@ func (op Operation) ToSQL(dialect string) ([]string, error) {
 
 func (m Migration) ToSQL(dialect string, up bool) ([]string, error) {
 	var queries []string
-	var ops []Operation
+	var ops Operation
 	if up {
 		ops = m.Up
 	} else {
 		ops = m.Down
 	}
-	for _, op := range ops {
-		qList, err := op.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in migration operation: %w", err)
-		}
-		queries = append(queries, qList...)
+	qList, err := ops.ToSQL(dialect)
+	if err != nil {
+		return nil, fmt.Errorf("error in migration operation: %w", err)
 	}
+	queries = append(queries, qList...)
 	return queries, nil
 }
 

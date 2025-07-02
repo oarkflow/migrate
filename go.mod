@@ -3,7 +3,8 @@ module github.com/oarkflow/migrate
 go 1.24.2
 
 require (
-	github.com/oarkflow/bcl v0.0.10
+	github.com/oarkflow/bcl v0.0.11
+	github.com/oarkflow/expr v0.0.11
 	github.com/oarkflow/json v0.0.28
 )
 
@@ -20,7 +21,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
-	github.com/oarkflow/expr v0.0.11 // indirect
 	github.com/oarkflow/jet v0.0.4 // indirect
 	github.com/oarkflow/xid v1.2.8 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

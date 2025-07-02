@@ -11,6 +11,10 @@ Migration "1748976351_create_seo_metadatas_table" {
         type = "boolean"
         default = false
       }
+      Column "name" {
+        type = "string"
+        nullable = false
+      }
       Column "status" {
         type = "string"
         size = 20

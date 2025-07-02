@@ -31,8 +31,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdhx/f4=
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/oarkflow/bcl v0.0.10 h1:mQPqqS1W5mKcgcrTGik5sGt0UH1qCUO/ZDYLsogZSIc=
-github.com/oarkflow/bcl v0.0.10/go.mod h1:R9EOfBT8A2fjIHeFEE+uTYhMJAQCrHLI1xLCZq4jpcA=
+github.com/oarkflow/bcl v0.0.11 h1:U9e7qBZGWXA3bAxrNt9hv3JaysYAmxSer2yEU8cGTJU=
+github.com/oarkflow/bcl v0.0.11/go.mod h1:R9EOfBT8A2fjIHeFEE+uTYhMJAQCrHLI1xLCZq4jpcA=
 github.com/oarkflow/cli v0.0.0-20250313133305-8d14a63c1883 h1:N0Mroo3lyZTcVUyPAAO40mhgVicrweifMNnOrXQxt+A=
 github.com/oarkflow/cli v0.0.0-20250313133305-8d14a63c1883/go.mod h1:8APSp4HJyCyh7R17XHQYSNz69N7+73S1z+/N8xhC6vo=
 github.com/oarkflow/date v0.0.4 h1:EwY/wiS3CqZNBx7b2x+3kkJwVNuGk+G0dls76kL/fhU=

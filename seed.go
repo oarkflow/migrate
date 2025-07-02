@@ -28,6 +28,7 @@ type FieldDefinition struct {
 	Value    any    `json:"value"`
 	Unique   bool   `json:"unique"`
 	Random   bool   `json:"random"`
+	Size     int    `json:"size"`
 	DataType string `json:"data_type"`
 }
 

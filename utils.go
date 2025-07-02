@@ -10,6 +10,17 @@ import (
 	"github.com/oarkflow/bcl"
 )
 
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func randomString(length int) string {
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 	f := gofakeit.New(0)
@@ -91,6 +102,10 @@ func init() {
 	bcl.RegisterFunction("fake_date", func(args ...any) (any, error) {
 		return f.Date(), nil
 	})
+
+	bcl.RegisterFunction("fake_datetime", func(args ...any) (any, error) {
+		return f.Date().Format(time.DateTime), nil
+	})
 	bcl.RegisterFunction("fake_pastdate", func(args ...any) (any, error) {
 		return f.DateRange(time.Now().AddDate(-10, 0, 0), time.Now()), nil
 	})
@@ -136,6 +151,13 @@ func init() {
 	})
 	bcl.RegisterFunction("fake_day", func(args ...any) (any, error) {
 		return f.Date().Day(), nil
+	})
+
+	bcl.RegisterFunction("fake_string", func(args ...any) (any, error) {
+		return randomString(10), nil
+	})
+	bcl.RegisterFunction("fake_status", func(args ...any) (any, error) {
+		return f.RandomString([]string{"ACTIVE", "INACTIVE", "BANNED", "SUSPENDED"}), nil
 	})
 	bcl.RegisterFunction("fake_day", func(args ...any) (any, error) {
 		return f.Date().Day(), nil

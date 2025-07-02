@@ -179,11 +179,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 	if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("failed to unmarshal migration file: %w", err)
 	}
-	if len(cfg.Migrations) == 0 {
-		return fmt.Errorf("no migration found in file %s", m.Name)
-	}
-	migration := cfg.Migrations[0]
-
+	migration := cfg.Migration
 	queries, err := migration.ToSQL(d.dialect, true)
 	if err != nil {
 		return fmt.Errorf("failed to generate SQL: %w", err)
@@ -243,10 +239,7 @@ func (d *Manager) RollbackMigration(step int) error {
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
 		}
-		if len(cfg.Migrations) == 0 {
-			return fmt.Errorf("no migration found in file %s for rollback", name)
-		}
-		migration := cfg.Migrations[0]
+		migration := cfg.Migration
 		downQueries, err := migration.ToSQL(d.dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
@@ -286,10 +279,7 @@ func (d *Manager) ResetMigrations() error {
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
 		}
-		if len(cfg.Migrations) == 0 {
-			return fmt.Errorf("no migration found in file %s for rollback", name)
-		}
-		migration := cfg.Migrations[0]
+		migration := cfg.Migration
 		downQueries, err := migration.ToSQL(d.dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
@@ -732,6 +722,18 @@ func (c *MigrateCommand) Extend() contracts.Extend {
 				Usage:   "Enable verbose output",
 				Value:   "false",
 			},
+			{
+				Name:    "seed",
+				Aliases: []string{"s"},
+				Usage:   "Seed tables after migration",
+				Value:   "false",
+			},
+			{
+				Name:    "rows",
+				Aliases: []string{"r"},
+				Usage:   "Number of seed rows (default 10)",
+				Value:   "10",
+			},
 		},
 	}
 }
@@ -803,6 +805,16 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to read migration directory: %w", err)
 	}
+
+	seedFlag := ctx.Option("seed")
+	seedRows := 10
+	if rowsStr := ctx.Option("rows"); rowsStr != "" {
+		if n, err := strconv.Atoi(rowsStr); err == nil && n > 0 {
+			seedRows = n
+		}
+	}
+	shouldSeed := seedFlag == "true" || seedFlag == "1"
+
 	for _, file := range files {
 		if file.IsDir() || !strings.HasSuffix(file.Name(), ".bcl") {
 			continue
@@ -817,22 +829,89 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
 			return fmt.Errorf("failed to unmarshal migration file %s: %w", name, err)
 		}
-		if len(cfg.Migrations) == 0 {
-			return fmt.Errorf("no migration found in file %s", name)
+		migration := cfg.Migration
+		for _, val := range migration.Validate {
+			if err := runPreUpChecks(val.PreUpChecks); err != nil {
+				return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
+			}
 		}
-		for _, migration := range cfg.Migrations {
-			for _, val := range migration.Validate {
-				if err := runPreUpChecks(val.PreUpChecks); err != nil {
-					return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
+		if err := c.Driver.ApplyMigration(migration); err != nil {
+			logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
+			return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
+		}
+		for _, val := range migration.Validate {
+			if err := runPostUpChecks(val.PostUpChecks); err != nil {
+				return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
+			}
+		}
+
+		// --- SEEDING LOGIC ---
+		if shouldSeed {
+			for _, ct := range migration.Up.CreateTable {
+				seedDef := SeedDefinition{
+					Name:  "auto_seed_" + ct.Name,
+					Table: ct.Name,
+					Rows:  seedRows,
 				}
-			}
-			if err := c.Driver.ApplyMigration(migration); err != nil {
-				logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
-				return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
-			}
-			for _, val := range migration.Validate {
-				if err := runPostUpChecks(val.PostUpChecks); err != nil {
-					return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
+				for _, col := range ct.Columns {
+					if col.AutoIncrement || col.Nullable {
+						continue
+					}
+					fd := FieldDefinition{
+						Name:     col.Name,
+						DataType: col.Type,
+						Size:     col.Size,
+					}
+					if col.Default != nil {
+						switch v := (col.Default).(type) {
+						case string:
+							if v == "now()" || v == "CURRENT_TIMESTAMP" {
+								fd.Value = time.Now().Format(time.DateTime)
+							} else {
+								fd.Value = v
+							}
+						default:
+							fd.Value = v
+						}
+						seedDef.Fields = append(seedDef.Fields, fd)
+						continue
+					}
+					// Map data type to fake_ function
+					fakeFunc := "fake_string"
+					switch strings.ToLower(col.Type) {
+					case "int", "integer", "number", "smallint", "mediumint", "bigint", "tinyint":
+						fakeFunc = "fake_uint"
+					case "float", "double", "decimal", "numeric", "real":
+						fakeFunc = "fake_float64"
+					case "bool", "boolean":
+						fakeFunc = "fake_bool"
+					case "date":
+						fakeFunc = "fake_date"
+					case "datetime", "timestamp":
+						fakeFunc = "fake_datetime"
+					case "year":
+						fakeFunc = "fake_year"
+					default:
+						fakeFunc = "fake_string"
+						if col.Name == "status" {
+							fakeFunc = "fake_status"
+						}
+					}
+					fd.Value = fakeFunc
+					seedDef.Fields = append(seedDef.Fields, fd)
+				}
+				queries, err := seedDef.ToSQL(c.Driver.(*Manager).dialect)
+				if err != nil {
+					logger.Error().Msgf("Failed to generate seed SQL for table %s: %v", ct.Name, err)
+					return fmt.Errorf("failed to generate seed SQL for table %s: %w", ct.Name, err)
+				}
+				logger.Info().Msgf("Seeding table: %s", ct.Name)
+				for _, q := range queries {
+					logger.Info().Msgf("Seed SQL: %s", q.SQL)
+					err := c.Driver.(*Manager).dbDriver.ApplySQL([]string{q.SQL}, q.Args)
+					if err != nil {
+						return fmt.Errorf("failed to apply seed for table %s: %w", ct.Name, err)
+					}
 				}
 			}
 		}
