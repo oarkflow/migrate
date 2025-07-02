@@ -461,6 +461,20 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 	return queries, nil
 }
 
+// helper to append non-empty string results from a slice of structs with ToSQL(dialect, tableName)
+func appendNonEmptyQueriesString[T any](queries []string, items []T, fn func(T) (string, error)) ([]string, error) {
+	for _, item := range items {
+		q, err := fn(item)
+		if err != nil {
+			return nil, err
+		}
+		if q != "" {
+			queries = append(queries, q)
+		}
+	}
+	return queries, nil
+}
+
 func (at AlterTable) ToSQL(dialect string) ([]string, error) {
 	if err := requireFields(at.Name); err != nil {
 		return nil, fmt.Errorf("AlterTable: %w", err)
@@ -478,23 +492,18 @@ func (at AlterTable) ToSQL(dialect string) ([]string, error) {
 			queries = append(queries, qList...)
 		}
 	}
-	for _, dropCol := range at.DropColumn {
-		q, err := dropCol.ToSQL(dialect, at.Name)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropColumn: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	var err error
+	queries, err = appendNonEmptyQueriesString(queries, at.DropColumn, func(dc DropColumn) (string, error) {
+		return dc.ToSQL(dialect, at.Name)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropColumn: %w", err)
 	}
-	for _, renameCol := range at.RenameColumn {
-		q, err := renameCol.ToSQL(dialect, at.Name)
-		if err != nil {
-			return nil, fmt.Errorf("error in RenameColumn: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, at.RenameColumn, func(rc RenameColumn) (string, error) {
+		return rc.ToSQL(dialect, at.Name)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in RenameColumn: %w", err)
 	}
 	return queries, nil
 }
@@ -525,176 +534,120 @@ func (op Operation) ToSQL(dialect string) ([]string, error) {
 			queries = append(queries, qList...)
 		}
 	}
-	for _, dd := range op.DeleteData {
-		q, err := dd.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DeleteData: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	var err error
+	queries, err = appendNonEmptyQueriesString(queries, op.DeleteData, func(dd DeleteData) (string, error) {
+		return dd.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DeleteData: %w", err)
 	}
-	for _, de := range op.DropEnumType {
-		q, err := de.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropEnumType: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropEnumType, func(de DropEnumType) (string, error) {
+		return de.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropEnumType: %w", err)
 	}
-	for _, drp := range op.DropRowPolicy {
-		q, err := drp.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropRowPolicy: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropRowPolicy, func(drp DropRowPolicy) (string, error) {
+		return drp.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropRowPolicy: %w", err)
 	}
-	for _, dmv := range op.DropMaterializedView {
-		q, err := dmv.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropMaterializedView: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropMaterializedView, func(dmv DropMaterializedView) (string, error) {
+		return dmv.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropMaterializedView: %w", err)
 	}
-	for _, dt := range op.DropTable {
-		q, err := dt.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropTable: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropTable, func(dt DropTable) (string, error) {
+		return dt.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropTable: %w", err)
 	}
-	for _, ds := range op.DropSchema {
-		q, err := ds.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropSchema: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropSchema, func(ds DropSchema) (string, error) {
+		return ds.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropSchema: %w", err)
 	}
-	for _, rt := range op.RenameTable {
-		q, err := rt.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in RenameTable: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.RenameTable, func(rt RenameTable) (string, error) {
+		return rt.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in RenameTable: %w", err)
 	}
-	for _, cv := range op.CreateView {
-		q, err := cv.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in CreateView: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.CreateView, func(cv CreateView) (string, error) {
+		return cv.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in CreateView: %w", err)
 	}
-	for _, dv := range op.DropView {
-		q, err := dv.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropView: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropView, func(dv DropView) (string, error) {
+		return dv.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropView: %w", err)
 	}
-	for _, rv := range op.RenameView {
-		q, err := rv.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in RenameView: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.RenameView, func(rv RenameView) (string, error) {
+		return rv.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in RenameView: %w", err)
 	}
-	for _, cf := range op.CreateFunction {
-		q, err := cf.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in CreateFunction: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.CreateFunction, func(cf CreateFunction) (string, error) {
+		return cf.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in CreateFunction: %w", err)
 	}
-	for _, df := range op.DropFunction {
-		q, err := df.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropFunction: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropFunction, func(df DropFunction) (string, error) {
+		return df.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropFunction: %w", err)
 	}
-	for _, rf := range op.RenameFunction {
-		q, err := rf.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in RenameFunction: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.RenameFunction, func(rf RenameFunction) (string, error) {
+		return rf.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in RenameFunction: %w", err)
 	}
-	for _, cp := range op.CreateProcedure {
-		q, err := cp.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in CreateProcedure: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.CreateProcedure, func(cp CreateProcedure) (string, error) {
+		return cp.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in CreateProcedure: %w", err)
 	}
-	for _, dp := range op.DropProcedure {
-		q, err := dp.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropProcedure: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropProcedure, func(dp DropProcedure) (string, error) {
+		return dp.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropProcedure: %w", err)
 	}
-	for _, rp := range op.RenameProcedure {
-		q, err := rp.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in RenameProcedure: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.RenameProcedure, func(rp RenameProcedure) (string, error) {
+		return rp.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in RenameProcedure: %w", err)
 	}
-	for _, ct := range op.CreateTrigger {
-		q, err := ct.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in CreateTrigger: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.CreateTrigger, func(ct CreateTrigger) (string, error) {
+		return ct.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in CreateTrigger: %w", err)
 	}
-	for _, dt := range op.DropTrigger {
-		q, err := dt.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in DropTrigger: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.DropTrigger, func(dt DropTrigger) (string, error) {
+		return dt.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in DropTrigger: %w", err)
 	}
-	for _, rt := range op.RenameTrigger {
-		q, err := rt.ToSQL(dialect)
-		if err != nil {
-			return nil, fmt.Errorf("error in RenameTrigger: %w", err)
-		}
-		if q != "" {
-			queries = append(queries, q)
-		}
+	queries, err = appendNonEmptyQueriesString(queries, op.RenameTrigger, func(rt RenameTrigger) (string, error) {
+		return rt.ToSQL(dialect)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error in RenameTrigger: %w", err)
 	}
 	return queries, nil
 }
