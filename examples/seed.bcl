@@ -1,4 +1,3 @@
-age = 100
 Seed "extendedTest" {
     table = "extended.table"
     Field "id" {
@@ -8,8 +7,16 @@ Seed "extendedTest" {
     Field "is_active" {
         value = true
     }
+    Field "age" {
+        value = "fake_age"
+        data_type = "int"
+    }
     Field "allowed_to_vote" {
-        value = age > 20 ? true : false
+        value = "expr: age.value > 20 ? true : false"
+		data_type = "boolean"
+    }
+    Field "is_citizen" {
+        value = "expr: allowed_to_vote.value ? true : false"
 		data_type = "boolean"
     }
     combine = ["name", "status"]

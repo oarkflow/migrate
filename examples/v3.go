@@ -3,14 +3,14 @@ package main
 import (
 	"log"
 	"os"
-
+	
 	"github.com/oarkflow/bcl"
-
+	
 	"github.com/oarkflow/migrate"
 )
 
 func main() {
-	data, err := os.ReadFile("migrations/1743913137_create_seo_metadatas_table.bcl")
+	data, err := os.ReadFile("migrations/1748976351_create_seo_metadatas_table.bcl")
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)
 	}

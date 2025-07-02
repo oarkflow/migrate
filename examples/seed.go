@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	
+
 	"github.com/oarkflow/bcl"
-	
+
 	"github.com/oarkflow/migrate"
 )
 
@@ -20,6 +20,6 @@ func main() {
 		log.Fatalf("Failed to unmarshal migration file: %v", err)
 	}
 	for _, c := range cfg.Seeds {
-		fmt.Println(c.ToSQL("mysql"))
+		fmt.Println(c.ToSQL("postgres"))
 	}
 }

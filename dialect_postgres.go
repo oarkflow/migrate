@@ -3,6 +3,7 @@ package migrate
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -299,6 +300,11 @@ func (p *PostgresDialect) WrapInTransactionWithConfig(queries []string, trans Tr
 	return tx
 }
 
+func IsInteger(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
 func (p *PostgresDialect) InsertSQL(table string, columns []string, values []any) (string, error) {
 	var quotedCols []string
 	for _, col := range columns {
@@ -309,6 +315,10 @@ func (p *PostgresDialect) InsertSQL(table string, columns []string, values []any
 		switch v := val.(type) {
 		case string:
 			if v == "true" || v == "false" {
+				quotedVals = append(quotedVals, v)
+				continue
+			}
+			if IsInteger(v) {
 				quotedVals = append(quotedVals, v)
 				continue
 			}

@@ -263,6 +263,10 @@ func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) 
 				quotedVals = append(quotedVals, v)
 				continue
 			}
+			if IsInteger(v) {
+				quotedVals = append(quotedVals, v)
+				continue
+			}
 			if !(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
 				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
 			}

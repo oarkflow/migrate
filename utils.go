@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -10,9 +11,27 @@ import (
 )
 
 func init() {
+	rand.Seed(time.Now().UnixNano())
 	f := gofakeit.New(0)
 	bcl.RegisterFunction("fake_uuid", func(args ...any) (any, error) {
 		return f.UUID(), nil
+	})
+	bcl.RegisterFunction("fake_age", func(args ...any) (any, error) {
+		min := 1
+		max := 100
+		var ok1, ok2 bool
+		if len(args) == 2 {
+			min, ok1 = args[0].(int)
+			max, ok2 = args[1].(int)
+			if !ok1 || !ok2 {
+				return nil, fmt.Errorf("fake_age arguments must be integers")
+			}
+		}
+
+		if min < 0 || max < 0 || min >= max {
+			return nil, fmt.Errorf("fake_age requires valid min and max values where min < max")
+		}
+		return rand.Intn(max-min+1) + min, nil
 	})
 	bcl.RegisterFunction("fake_name", func(args ...any) (any, error) {
 		return f.Name(), nil
@@ -118,8 +137,20 @@ func init() {
 	bcl.RegisterFunction("fake_day", func(args ...any) (any, error) {
 		return f.Date().Day(), nil
 	})
-	bcl.RegisterFunction("fake_weekday", func(args ...any) (any, error) {
-		return f.Date().Weekday().String(), nil
+	bcl.RegisterFunction("fake_day", func(args ...any) (any, error) {
+		return f.Date().Day(), nil
+	})
+	bcl.RegisterFunction("fake_bool", func(args ...any) (any, error) {
+		return f.Bool(), nil
+	})
+	bcl.RegisterFunction("fake_int", func(args ...any) (any, error) {
+		return f.Int64(), nil
+	})
+	bcl.RegisterFunction("fake_float32", func(args ...any) (any, error) {
+		return f.Float32(), nil
+	})
+	bcl.RegisterFunction("fake_float64", func(args ...any) (any, error) {
+		return f.Float64(), nil
 	})
 	bcl.RegisterFunction("fake_year", func(args ...any) (any, error) {
 		return f.Date().Year(), nil

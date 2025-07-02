@@ -269,6 +269,10 @@ func (m *MySQLDialect) InsertSQL(table string, columns []string, values []any) (
 				quotedVals = append(quotedVals, "0")
 				continue
 			}
+			if IsInteger(v) {
+				quotedVals = append(quotedVals, v)
+				continue
+			}
 			if !(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
 				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
 			}
