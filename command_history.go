@@ -582,7 +582,10 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 			}
 			return ""
 		}() + `">
-  <div class="accordion-header">` + group.Date.Format(time.RFC1123) + ` &mdash; Migration: <b>` + group.MigrationName + `</b></div>
+  <div class="accordion-header" style="display:flex;flex-direction:column;align-items:flex-start;">
+    <span class="accordion-title" style="font-weight:bold;color:#111;font-size:1.1em;">` + group.MigrationName + `</span>
+    <span class="accordion-date" style="color:#888;font-size:0.95em;margin-top:0.2em;">` + group.Date.Format(time.RFC1123) + `</span>
+  </div>
   <div class="accordion-content">`
 		for _, ch := range group.Actions {
 			html += `<div class="event">
@@ -595,6 +598,8 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 	}
 
 	html += `</div>
+</div>
+<div class="structure-col">
 <h2>Final Structure</h2>
 <div class="final-structure">`
 	switch {
@@ -616,6 +621,8 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 		html += `<b>Object does not exist (dropped).</b>`
 	}
 	html += `</div>
+</div>
+</div>
 <script>
 document.querySelectorAll('.accordion-header').forEach(function(header) {
 	header.addEventListener('click', function() {
@@ -652,7 +659,9 @@ h1 { color: #333; }
 .history-col { flex: 1.2; padding: 2em; overflow-y: auto; border-right: 1px solid #eee; background: #f8f9fa; }
 .structure-col { flex: 1; padding: 2em; overflow-y: auto; background: #fff; }
 .accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
-.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; font-weight: bold; }
+.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; }
+.accordion-title { font-weight: bold; color: #111; font-size: 1.1em; }
+.accordion-date { color: #888; font-size: 0.95em; margin-top: 0.2em; }
 .accordion-content { display: none; padding: 1em; }
 .accordion.active .accordion-content { display: block; }
 .accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
@@ -661,18 +670,31 @@ h1 { color: #333; }
 .event .op { font-weight: bold; color: #007bff; }
 .event .details { margin-bottom: 0.5em; }
 .event .migration { color: #888; font-size: 0.95em; }
-.final-structure { background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 8px; }
-th, td { padding: 0.5em 1em; border-bottom: 1px solid #eee; }
-ul { margin: 0; padding-left: 1.2em; }
-pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
+.final-structure { background: #fff; border: 1px solid #ddd; padding: 1.5em 1em 1em 1em; border-radius: 8px; margin-top: 1em; }
+.structure-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.structure-table th, .structure-table td { padding: 0.6em 1em; border-bottom: 1px solid #eee; text-align: left; }
+.structure-table th { background: #f1f3f4; }
+.flag-badge { display: inline-block; margin-right: 0.3em; margin-bottom: 0.1em; padding: 2px 7px; border-radius: 4px; font-size: 0.85em; font-weight: 500; }
+.flag-pk { background: #007bff; color: #fff; }
+.flag-ai { background: #28a745; color: #fff; }
+.flag-unique { background: #ffc107; color: #333; }
+.flag-index { background: #6c757d; color: #fff; }
+.flag-null { background: #17a2b8; color: #fff; }
+.flag-default { background: #e83e8c; color: #fff; }
+.flag-check { background: #fd7e14; color: #fff; }
+@media (max-width: 900px) {
+	.main-container { flex-direction: column; }
+	.history-col, .structure-col { padding: 1em; }
+}
 </style>
 </head>
 <body>
+<h1 style="margin:1em 2em 0 2em;">History Report: All Objects</h1>
 <div class="main-container">
-<div class="history-col">
+	<div class="history-col">
 <h1>History: ` + objectName + `</h1>
 <div id="history-accordion">`
-
+	// Accordion for each migration (date), grouping all actions under that date
 	for idx, key := range migrationOrder {
 		group := migrationMap[key]
 		html += `<div class="accordion` + func() string {
@@ -681,7 +703,10 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 			}
 			return ""
 		}() + `">
-  <div class="accordion-header">` + group.Date.Format(time.RFC1123) + ` &mdash; Migration: <b>` + group.MigrationName + `</b></div>
+  <div class="accordion-header" style="display:flex;flex-direction:column;align-items:flex-start;">
+    <span class="accordion-title" style="font-weight:bold;color:#111;font-size:1.1em;">` + group.MigrationName + `</span>
+    <span class="accordion-date" style="color:#888;font-size:0.95em;margin-top:0.2em;">` + group.Date.Format(time.RFC1123) + `</span>
+  </div>
   <div class="accordion-content">`
 		for _, ch := range group.Actions {
 			html += `<div class="event">
@@ -692,7 +717,6 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 		}
 		html += `</div></div>`
 	}
-
 	html += `</div>
 </div>
 <div class="structure-col">
@@ -700,11 +724,46 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 <div class="final-structure">`
 	switch {
 	case finalTable != nil:
-		html += `<table><tr><th>Column</th><th>Type</th><th>PK</th><th>AI</th><th>Unique</th><th>Index</th><th>Nullable</th><th>Default</th><th>Check</th></tr>`
+		html += `<table class="structure-table"><tr><th>Column</th><th>Type</th><th>Flags</th><th>Default</th><th>Check</th></tr>`
 		for _, col := range finalTable.Columns {
-			html += `<tr><td>` + col.Name + `</td><td>` + col.Type + `</td><td>` + boolStr(col.PrimaryKey) + `</td><td>` + boolStr(col.AutoIncrement) + `</td><td>` + boolStr(col.Unique) + `</td><td>` + boolStr(col.Index) + `</td><td>` + boolStr(col.Nullable) + `</td><td>` + fmt.Sprintf("%v", col.Default) + `</td><td>` + col.Check + `</td></tr>`
+			flags := ""
+			if col.PrimaryKey {
+				flags += `<span class="flag-badge flag-pk">PK</span>`
+			}
+			if col.AutoIncrement {
+				flags += `<span class="flag-badge flag-ai">AI</span>`
+			}
+			if col.Unique {
+				flags += `<span class="flag-badge flag-unique">Unique</span>`
+			}
+			if col.Index {
+				flags += `<span class="flag-badge flag-index">Index</span>`
+			}
+			if col.Nullable {
+				flags += `<span class="flag-badge flag-null">Nullable</span>`
+			}
+			html += `<tr>
+<td>` + col.Name + `</td>
+<td><code>` + col.Type + `</code></td>
+<td>` + flags + `</td>
+<td>` + func() string {
+				if col.Default != nil && col.Default != "" {
+					return `<span class="flag-badge flag-default">` + fmt.Sprintf("%v", col.Default) + `</span>`
+				}
+				return ""
+			}() + `</td>
+<td>` + func() string {
+				if col.Check != "" {
+					return `<span class="flag-badge flag-check">` + col.Check + `</span>`
+				}
+				return ""
+			}() + `</td>
+</tr>`
 		}
 		html += `</table>`
+		if len(finalTable.PrimaryKey) > 0 {
+			html += `<div style="margin-top:1em;"><b>Primary Key:</b> <span class="flag-badge flag-pk">` + strings.Join(finalTable.PrimaryKey, ", ") + `</span></div>`
+		}
 	case finalView != nil:
 		html += describeView(*finalView)
 	case finalFunction != nil:
@@ -1015,7 +1074,10 @@ func generateHTMLReportAllObjects(
 				}
 				return ""
 			}() + `">
-  <div class="accordion-header">` + group.Date.Format(time.RFC1123) + ` &mdash; Migration: <b>` + group.MigrationName + `</b></div>
+  <div class="accordion-header" style="display:flex;flex-direction:column;align-items:flex-start;">
+    <span class="accordion-title" style="font-weight:bold;color:#111;font-size:1.1em;">` + group.MigrationName + `</span>
+    <span class="accordion-date" style="color:#888;font-size:0.95em;margin-top:0.2em;">` + group.Date.Format(time.RFC1123) + `</span>
+  </div>
   <div class="accordion-content">`
 			for _, ch := range group.Actions {
 				historyHTML += `<div class="event">
@@ -1029,15 +1091,50 @@ func generateHTMLReportAllObjects(
 		historyHTML += `</div>`
 
 		// Structure HTML
-		structureHTML := `<div class="final-structure">`
+		structureHTML := `<h2 style="margin-top:0;">Final Structure</h2><div class="final-structure">`
 		switch obj.Type {
 		case "table":
 			if finalTable != nil {
-				structureHTML += `<table><tr><th>Column</th><th>Type</th><th>PK</th><th>AI</th><th>Unique</th><th>Index</th><th>Nullable</th><th>Default</th><th>Check</th></tr>`
+				structureHTML += `<table class="structure-table"><tr><th>Column</th><th>Type</th><th>Flags</th><th>Default</th><th>Check</th></tr>`
 				for _, col := range finalTable.Columns {
-					structureHTML += `<tr><td>` + col.Name + `</td><td>` + col.Type + `</td><td>` + boolStr(col.PrimaryKey) + `</td><td>` + boolStr(col.AutoIncrement) + `</td><td>` + boolStr(col.Unique) + `</td><td>` + boolStr(col.Index) + `</td><td>` + boolStr(col.Nullable) + `</td><td>` + fmt.Sprintf("%v", col.Default) + `</td><td>` + col.Check + `</td></tr>`
+					flags := ""
+					if col.PrimaryKey {
+						flags += `<span class="flag-badge flag-pk">PK</span>`
+					}
+					if col.AutoIncrement {
+						flags += `<span class="flag-badge flag-ai">AI</span>`
+					}
+					if col.Unique {
+						flags += `<span class="flag-badge flag-unique">Unique</span>`
+					}
+					if col.Index {
+						flags += `<span class="flag-badge flag-index">Index</span>`
+					}
+					if col.Nullable {
+						flags += `<span class="flag-badge flag-null">Nullable</span>`
+					}
+					structureHTML += `<tr>
+<td>` + col.Name + `</td>
+<td><code>` + col.Type + `</code></td>
+<td>` + flags + `</td>
+<td>` + func() string {
+						if col.Default != nil && col.Default != "" {
+							return `<span class="flag-badge flag-default">` + fmt.Sprintf("%v", col.Default) + `</span>`
+						}
+						return ""
+					}() + `</td>
+<td>` + func() string {
+						if col.Check != "" {
+							return `<span class="flag-badge flag-check">` + col.Check + `</span>`
+						}
+						return ""
+					}() + `</td>
+</tr>`
 				}
 				structureHTML += `</table>`
+				if len(finalTable.PrimaryKey) > 0 {
+					structureHTML += `<div style="margin-top:1em;"><b>Primary Key:</b> <span class="flag-badge flag-pk">` + strings.Join(finalTable.PrimaryKey, ", ") + `</span></div>`
+				}
 			} else {
 				structureHTML += `<b>Object does not exist (dropped).</b>`
 			}
@@ -1095,7 +1192,9 @@ h1 { color: #333; }
 .history-col { flex: 1.2; padding: 2em; overflow-y: auto; border-right: 1px solid #eee; background: #f8f9fa; }
 .structure-col { flex: 1; padding: 2em; overflow-y: auto; background: #fff; }
 .accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
-.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; font-weight: bold; }
+.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; }
+.accordion-title { font-weight: bold; color: #111; font-size: 1.1em; }
+.accordion-date { color: #888; font-size: 0.95em; margin-top: 0.2em; }
 .accordion-content { display: none; padding: 1em; }
 .accordion.active .accordion-content { display: block; }
 .accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
@@ -1104,10 +1203,18 @@ h1 { color: #333; }
 .event .op { font-weight: bold; color: #007bff; }
 .event .details { margin-bottom: 0.5em; }
 .event .migration { color: #888; font-size: 0.95em; }
-.final-structure { background: #fff; border: 1px solid #ddd; padding: 1em; border-radius: 8px; }
-th, td { padding: 0.5em 1em; border-bottom: 1px solid #eee; }
-ul { margin: 0; padding-left: 1.2em; }
-pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
+.final-structure { background: #fff; border: 1px solid #ddd; padding: 1.5em 1em 1em 1em; border-radius: 8px; margin-top: 1em; }
+.structure-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.structure-table th, .structure-table td { padding: 0.6em 1em; border-bottom: 1px solid #eee; text-align: left; }
+.structure-table th { background: #f1f3f4; }
+.flag-badge { display: inline-block; margin-right: 0.3em; margin-bottom: 0.1em; padding: 2px 7px; border-radius: 4px; font-size: 0.85em; font-weight: 500; }
+.flag-pk { background: #007bff; color: #fff; }
+.flag-ai { background: #28a745; color: #fff; }
+.flag-unique { background: #ffc107; color: #333; }
+.flag-index { background: #6c757d; color: #fff; }
+.flag-null { background: #17a2b8; color: #fff; }
+.flag-default { background: #e83e8c; color: #fff; }
+.flag-check { background: #fd7e14; color: #fff; }
 @media (max-width: 900px) {
 	.layout3col { flex-direction: column; }
 	.sidebar { width: 100%; }
@@ -1117,6 +1224,7 @@ pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
 </style>
 </head>
 <body>
+<h1 style="margin:1em 2em 0 2em;">History Report: All Objects</h1>
 <div class="layout3col">
 	<div class="sidebar">
 		<h2>Objects</h2>
