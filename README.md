@@ -6,18 +6,26 @@
 - **Transaction Handling:** Wraps migration operations in transactions to ensure consistency.
 - **Validation Checks:** Pre- and Post-migration validation commands ensure proper migration execution.
 - **Seed Data Support:** Ability to generate and insert seed data for testing environments.
+- **Seed File Creation:** CLI command to generate seed files for tables.
+- **Auto-Seeding:** Optionally auto-seed tables after migrations using generated or custom seed files.
+- **Custom History Drivers:** Supports file-based and database-based migration history storage.
+- **Extensible Dialects:** Easily add or modify SQL dialects for different databases.
+- **Verbose Logging:** CLI supports verbose output for debugging and transparency.
 
 ## CLI Commands
 - **make:migration:** Creates a new migration file based on the operation type.
-- **migrate:** Applies all pending migration files.
+- **make:seed:** Creates a new seed file for a table.
+- **migrate:** Applies all pending migration files, with optional auto-seeding.
 - **migration:rollback:** Rolls back the last applied migration (or a specified number of steps).
 - **migration:reset:** Resets migrations by rolling back all applied migrations.
 - **migration:validate:** Validates the applied migration history against the migration files.
+- **db:seed:** Runs seed files to populate tables, with optional truncation.
 
 ## Effectiveness
 - **Reliability:** Ensures migrations are applied safely using checksum comparison and transactional operations.
 - **Ease of Use:** Simple command-line interface with clear commands and descriptive error logging.
 - **Flexibility:** Automatically adapts SQL generation based on target dialect (Postgres, MySQL, SQLite).
+- **Extensibility:** Add new drivers, dialects, or history storage backends without changing core logic.
 
 ## Extendable HistoryDriver and DatabaseDriver
 - **HistoryDriver:** Supports file-based storage by default and can be easily extended to use database storage.
@@ -31,12 +39,14 @@ Developers choose this package because it:
 - Handles migration history, rollback, and reinstallation seamlessly.
 - Offers extendable drivers to cater to custom database or storage requirements.
 - Eliminates the pain of manually adjusting SQL files during database migration—developers need not worry about differences between SQL dialects.
+- Supports robust seeding and test data generation for development and CI/CD.
 
 ### Use Cases & Examples
 1. **Rapid Development Setup:** Quickly create and apply migrations to set up new application schemas with a single CLI command.
 2. **Continuous Integration:** Integrate the migration commands in CI/CD pipelines to ensure schema consistency in every environment.
 3. **Database Upgrades:** Efficiently apply, rollback, or reset migrations during application upgrades with minimal downtime.
 4. **Custom Extensions:** Easily extend or replace the default HistoryDriver/DatabaseDriver for specialized project needs.
+5. **Automated Seeding:** Generate and run seed files for tables, supporting fake data and custom expressions.
 
 Note: Developers do not need to worry about the pain of SQL file migration from one database to another; the package handles SQL generation differences automatically.
 
@@ -77,12 +87,54 @@ Migration "1665678901_create_users_table" {
 }
 ```
 
-### Apply Migrations
+### Create a New Seed File
 Command:
 ```
-$ migrate
+$ go run main.go cli make:seed seo_metadatas
 ```
-This runs all pending migrations.
+This creates a file named similar to:
+```bcl
+Seed "extendedTest" {
+    table = "seo_metadatas"
+    Field "id" {
+        value = "fake_uuid"
+        unique = true
+    }
+    Field "is_active" {
+        value = true
+    }
+    Field "age" {
+        value = "fake_age"
+        data_type = "int"
+    }
+    Field "allowed_to_vote" {
+        value = "expr: age.value > 20 ? true : false"
+		data_type = "boolean"
+    }
+    Field "is_citizen" {
+        value = "expr: allowed_to_vote.value ? true : false"
+		data_type = "boolean"
+    }
+    combine = ["name", "status"]
+    condition = "if_exists"
+    rows = 2
+}
+
+```
+
+### Apply Migrations (with optional seeding)
+Command:
+```
+$ go run main.go cli migrate --seed=true --rows=10
+```
+This runs all pending migrations and seeds tables with 10 rows each.
+
+### Run Seeds
+Command:
+```
+$ go run main.go cli db:seed --file=path/to/seed_file.bcl --truncate=true
+```
+Runs the specified seed file, truncating the table before seeding.
 
 ### Rollback Migrations
 Command (rollback last migration):
@@ -100,3 +152,4 @@ $ go run main.go cli migration:reset
 Command:
 ```
 $ go run main.go cli migration:validate
+```
