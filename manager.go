@@ -6,10 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
-
+	
 	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/console"
@@ -104,7 +103,7 @@ func defaultManager(client contracts.Cli) *Manager {
 }
 
 func NewManager(opts ...ManagerOption) *Manager {
-
+	
 	cli.SetName(Name)
 	cli.SetVersion(Version)
 	app := cli.New()
@@ -270,12 +269,12 @@ func (d *Manager) RollbackMigration(step int) error {
 
 func (d *Manager) ResetMigrations() error {
 	logger.Info().Msg("Resetting migrations...")
-
+	
 	histories, err := d.historyDriver.Load()
 	if err != nil {
 		return err
 	}
-
+	
 	for i := len(histories) - 1; i >= 0; i-- {
 		name := histories[i].Name
 		path := filepath.Join(d.migrationDir, name+".bcl")
@@ -301,7 +300,7 @@ func (d *Manager) ResetMigrations() error {
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
 	}
-
+	
 	if fh, ok := d.historyDriver.(*FileHistoryDriver); ok {
 		return os.WriteFile(fh.filePath, []byte("[]"), 0644)
 	}
@@ -317,7 +316,7 @@ func (d *Manager) ValidateMigrations() error {
 	if err != nil {
 		return err
 	}
-
+	
 	applied := make(map[string]bool)
 	for _, h := range histories {
 		applied[h.Name] = true
@@ -399,7 +398,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, viewName, viewName, viewName)
 			case "function":
-
+				
 				funcName := strings.Join(tokens[2:len(tokens)-1], "_")
 				template = fmt.Sprintf(`Migration "%s" {
   Version = "1.0.0"
@@ -532,7 +531,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, triggerName, triggerName)
 			default:
-
+				
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -601,7 +600,7 @@ func (d *Manager) CreateMigrationFile(name string) error {
   }
 }`, name, triggerName, triggerName)
 			default:
-
+				
 				var table string
 				if objType == "table" {
 					table = strings.Join(tokens[2:len(tokens)-1], "_")
@@ -647,109 +646,6 @@ func defaultTemplate(name string) string {
 }`, name)
 }
 
-type MakeMigrationCommand struct {
-	Driver IManager
-}
-
-func (c *MakeMigrationCommand) Signature() string {
-	return "make:migration"
-}
-
-func (c *MakeMigrationCommand) Description() string {
-	return "Creates a new migration file in the designated directory."
-}
-
-func (c *MakeMigrationCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Enable verbose output",
-				Value:   "false",
-			},
-		},
-	}
-}
-
-func (c *MakeMigrationCommand) Handle(ctx contracts.Context) error {
-	name := ctx.Argument(0)
-	if name == "" {
-		return errors.New("migration name is required")
-	}
-	return c.Driver.CreateMigrationFile(name)
-}
-
-type MakeSeedCommand struct {
-	Driver IManager
-}
-
-func (c *MakeSeedCommand) Signature() string {
-	return "make:seed"
-}
-
-func (c *MakeSeedCommand) Description() string {
-	return "Creates a new seed file for table in the designated directory."
-}
-
-func (c *MakeSeedCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Enable verbose output",
-				Value:   "false",
-			},
-		},
-	}
-}
-
-func (c *MakeSeedCommand) Handle(ctx contracts.Context) error {
-	name := ctx.Argument(0)
-	if name == "" {
-		return errors.New("seed name is required")
-	}
-	return c.Driver.CreateSeedFile(name)
-}
-
-type MigrateCommand struct {
-	Driver IManager
-}
-
-func (c *MigrateCommand) Signature() string {
-	return "migrate"
-}
-
-func (c *MigrateCommand) Description() string {
-	return "Migrate all migration files that are not already applied."
-}
-
-func (c *MigrateCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Enable verbose output",
-				Value:   "false",
-			},
-			{
-				Name:    "seed",
-				Aliases: []string{"s"},
-				Usage:   "Seed tables after migration",
-				Value:   "false",
-			},
-			{
-				Name:    "rows",
-				Aliases: []string{"r"},
-				Usage:   "Number of seed rows (default 10)",
-				Value:   "10",
-			},
-		},
-	}
-}
-
 func acquireLock() error {
 	if _, err := os.Stat(lockFileName); err == nil {
 		return fmt.Errorf("migration lock already acquired")
@@ -772,7 +668,7 @@ func releaseLock() error {
 func runPreUpChecks(checks []string) error {
 	for _, check := range checks {
 		logger.Printf("Executing PreUpCheck: %s", check)
-
+		
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PreUp check failed: %s", check)
 		}
@@ -784,316 +680,13 @@ func runPreUpChecks(checks []string) error {
 func runPostUpChecks(checks []string) error {
 	for _, check := range checks {
 		logger.Printf("Executing PostUpCheck: %s", check)
-
+		
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PostUp check failed: %s", check)
 		}
 	}
 	logger.Info().Msg("All PostUpChecks passed.")
 	return nil
-}
-
-func (c *MigrateCommand) Handle(ctx contracts.Context) error {
-	// Set verbose flag on Manager if -v is passed
-	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
-	if mgr, ok := c.Driver.(*Manager); ok {
-		mgr.Verbose = verbose
-	}
-	if err := c.Driver.ValidateHistoryStorage(); err != nil {
-		return fmt.Errorf("history storage validation failed: %w", err)
-	}
-	if err := acquireLock(); err != nil {
-		return fmt.Errorf("cannot start migration: %w", err)
-	}
-	defer func() {
-		if err := releaseLock(); err != nil {
-			logger.Printf("Warning releasing lock: %v", err)
-		}
-	}()
-	if err := c.Driver.ValidateMigrations(); err != nil {
-		logger.Printf("Validation warning: %v", err)
-	}
-	files, err := os.ReadDir(c.Driver.MigrationDir())
-	if err != nil {
-		return fmt.Errorf("failed to read migration directory: %w", err)
-	}
-
-	seedFlag := ctx.Option("seed")
-	seedRows := 10
-	if rowsStr := ctx.Option("rows"); rowsStr != "" {
-		if n, err := strconv.Atoi(rowsStr); err == nil && n > 0 {
-			seedRows = n
-		}
-	}
-	shouldSeed := seedFlag == "true" || seedFlag == "1"
-
-	for _, file := range files {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".bcl") {
-			continue
-		}
-		name := strings.TrimSuffix(file.Name(), ".bcl")
-		path := filepath.Join(c.Driver.MigrationDir(), file.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read migration file %s: %w", name, err)
-		}
-		var cfg Config
-		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("failed to unmarshal migration file %s: %w", name, err)
-		}
-		migration := cfg.Migration
-		// Add requiredFields check for migration.Name
-		if err := requireFields(migration.Name); err != nil {
-			return fmt.Errorf("MigrateCommand.Handle: %w", err)
-		}
-		for _, val := range migration.Validate {
-			if err := runPreUpChecks(val.PreUpChecks); err != nil {
-				return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
-			}
-		}
-		if err := c.Driver.ApplyMigration(migration); err != nil {
-			logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
-			return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
-		}
-		for _, val := range migration.Validate {
-			if err := runPostUpChecks(val.PostUpChecks); err != nil {
-				return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
-			}
-		}
-
-		// --- SEEDING LOGIC ---
-		if shouldSeed {
-			for _, ct := range migration.Up.CreateTable {
-				// Add requiredFields check for ct.Name
-				if err := requireFields(ct.Name); err != nil {
-					return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
-				}
-				seedDef := SeedDefinition{
-					Name:  "auto_seed_" + ct.Name,
-					Table: ct.Name,
-					Rows:  seedRows,
-				}
-				for _, col := range ct.Columns {
-					// Add requiredFields check for col.Name
-					if err := requireFields(col.Name); err != nil {
-						return fmt.Errorf("MigrateCommand.Handle (seed column): %w", err)
-					}
-					if col.AutoIncrement || col.Nullable {
-						continue
-					}
-					fd := FieldDefinition{
-						Name:     col.Name,
-						DataType: col.Type,
-						Size:     col.Size,
-					}
-					if col.Default != nil {
-						switch v := (col.Default).(type) {
-						case string:
-							if v == "now()" || v == "CURRENT_TIMESTAMP" {
-								fd.Value = time.Now().Format(time.DateTime)
-							} else {
-								fd.Value = v
-							}
-						default:
-							fd.Value = v
-						}
-						seedDef.Fields = append(seedDef.Fields, fd)
-						continue
-					}
-					// Map data type to fake_ function
-					fakeFunc := "fake_string"
-					switch strings.ToLower(col.Type) {
-					case "int", "integer", "number", "smallint", "mediumint", "bigint", "tinyint":
-						fakeFunc = "fake_uint"
-					case "float", "double", "decimal", "numeric", "real":
-						fakeFunc = "fake_float64"
-					case "bool", "boolean":
-						fakeFunc = "fake_bool"
-					case "date":
-						fakeFunc = "fake_date"
-					case "datetime", "timestamp":
-						fakeFunc = "fake_datetime"
-					case "year":
-						fakeFunc = "fake_year"
-					default:
-						fakeFunc = "fake_string"
-						if col.Name == "status" {
-							fakeFunc = "fake_status"
-						}
-					}
-					fd.Value = fakeFunc
-					seedDef.Fields = append(seedDef.Fields, fd)
-				}
-				queries, err := seedDef.ToSQL(c.Driver.(*Manager).dialect)
-				if err != nil {
-					logger.Error().Msgf("Failed to generate seed SQL for table %s: %v", ct.Name, err)
-					return fmt.Errorf("failed to generate seed SQL for table %s: %w", ct.Name, err)
-				}
-				logger.Info().Msgf("Seeding table: %s", ct.Name)
-				for _, q := range queries {
-					logger.Info().Msgf("Seed SQL: %s", q.SQL)
-					err := c.Driver.(*Manager).dbDriver.ApplySQL([]string{q.SQL}, q.Args)
-					if err != nil {
-						return fmt.Errorf("failed to apply seed for table %s: %w", ct.Name, err)
-					}
-				}
-			}
-		}
-	}
-	return nil
-}
-
-type RollbackCommand struct {
-	Driver IManager
-}
-
-func (c *RollbackCommand) Signature() string {
-	return "migration:rollback"
-}
-
-func (c *RollbackCommand) Description() string {
-	return "Rolls back migrations. Optionally specify --step=<n>."
-}
-
-func (c *RollbackCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Enable verbose output",
-				Value:   "false",
-			},
-		},
-	}
-}
-
-func (c *RollbackCommand) Handle(ctx contracts.Context) error {
-	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
-	if mgr, ok := c.Driver.(*Manager); ok {
-		mgr.Verbose = verbose
-	}
-	stepStr := ctx.Option("step")
-	step := 1
-	if stepStr != "" {
-		var err error
-		step, err = strconv.Atoi(stepStr)
-		if err != nil {
-			return fmt.Errorf("invalid step value: %w", err)
-		}
-	}
-	return c.Driver.RollbackMigration(step)
-}
-
-type ResetCommand struct {
-	Driver IManager
-}
-
-func (c *ResetCommand) Signature() string {
-	return "migration:reset"
-}
-
-func (c *ResetCommand) Description() string {
-	return "Resets migrations by rolling back and reapplying all migrations."
-}
-
-func (c *ResetCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Enable verbose output",
-				Value:   "false",
-			},
-		},
-	}
-}
-
-func (c *ResetCommand) Handle(ctx contracts.Context) error {
-	return c.Driver.ResetMigrations()
-}
-
-type ValidateCommand struct {
-	Driver IManager
-}
-
-func (c *ValidateCommand) Signature() string {
-	return "migration:validate"
-}
-
-func (c *ValidateCommand) Description() string {
-	return "Validates the migration history against migration files."
-}
-
-func (c *ValidateCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Usage:   "Enable verbose output",
-				Value:   "false",
-			},
-		},
-	}
-}
-
-func (c *ValidateCommand) Handle(ctx contracts.Context) error {
-	return c.Driver.ValidateMigrations()
-}
-
-type SeedCommand struct {
-	Driver IManager
-}
-
-func (c *SeedCommand) Signature() string {
-	return "db:seed"
-}
-
-func (c *SeedCommand) Description() string {
-	return "Run database seeds from a seed file."
-}
-
-func (c *SeedCommand) Extend() contracts.Extend {
-	return contracts.Extend{
-		Flags: []contracts.Flag{
-			{
-				Name:    "file",
-				Aliases: []string{"f"},
-				Usage:   "Seed file to run",
-				Value:   "",
-			},
-			{
-				Name:    "truncate",
-				Aliases: []string{"t"},
-				Usage:   "Truncate tables before seeding",
-				Value:   "false",
-			},
-		},
-	}
-}
-
-func (c *SeedCommand) Handle(ctx contracts.Context) error {
-	var files []string
-	seedFile := ctx.Option("file")
-	truncateOption := ctx.Option("truncate")
-	truncate := truncateOption == "true" || truncateOption == "1"
-	if seedFile != "" {
-		files = append(files, seedFile)
-	} else {
-		osFiles, _ := os.ReadDir(c.Driver.SeedDir())
-		for _, file := range osFiles {
-			if !file.IsDir() && strings.HasSuffix(file.Name(), ".bcl") {
-				files = append(files, filepath.Join(c.Driver.SeedDir(), file.Name()))
-			}
-		}
-	}
-	if len(files) == 0 {
-		logger.Printf("No seed files found in %s", c.Driver.SeedDir())
-		return nil
-	}
-	return c.Driver.RunSeeds(truncate, files...)
 }
 
 func (d *Manager) RunSeeds(truncate bool, seedFiles ...string) error {

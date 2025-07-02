@@ -1,0 +1,17 @@
+Migration "1751478327_add_column_user_id_to_seo_metadatas_table" {
+  Version = "1.0.0"
+  Description = "New migration"
+  Connection = "default"
+  Up {
+    AlterTable "seo_metadatas" {
+      AddColumn "user_id" {
+        type = "integer"
+        nullable = true
+        default = null
+      }
+    }
+  }
+  Down {
+    # Define rollback operations here.
+  }
+}
