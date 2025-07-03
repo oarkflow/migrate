@@ -173,7 +173,10 @@ func describeColumn(c AddColumn) string {
 
 func boolBadge(label string, b bool) string {
 	if b {
-		return fmt.Sprintf(` <span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:4px;font-size:0.85em">%s</span>`, label)
+		return fmt.Sprintf(
+			` <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs">%s</span>`,
+			label,
+		)
 	}
 	return ""
 }
@@ -182,14 +185,20 @@ func defaultBadge(def any) string {
 	if def == nil || def == "" {
 		return ""
 	}
-	return fmt.Sprintf(` <span style="background:#ffc107;color:#333;padding:2px 6px;border-radius:4px;font-size:0.85em">Default: %v</span>`, def)
+	return fmt.Sprintf(
+		` <span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">Default: %v</span>`,
+		def,
+	)
 }
 
 func commentBadge(comment string) string {
 	if comment == "" {
 		return ""
 	}
-	return fmt.Sprintf(` <span style="background:#17a2b8;color:#fff;padding:2px 6px;border-radius:4px;font-size:0.85em">Check: %s</span>`, comment)
+	return fmt.Sprintf(
+		` <span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">Check: %s</span>`,
+		comment,
+	)
 }
 
 func describeView(cv CreateView) string {
@@ -491,49 +500,55 @@ func generateHTMLReportAllObjectsTemplate(
 
 		// Structure HTML
 		var structureHTML string
-		structureHTML += `<h2 style="margin-top:0;">Final Structure</h2><div class="final-structure">`
+		structureHTML += `<h2 class="mt-0 text-xl font-bold">Final Structure</h2><div class="mb-4">`
 		switch obj.Type {
 		case "table":
 			if finalTable != nil {
-				structureHTML += `<table class="structure-table"><tr><th>Column</th><th>Type</th><th>Flags</th><th>Default</th><th>Check</th></tr>`
+				structureHTML += `<table class="min-w-full border border-gray-300 mb-2 text-sm"><thead><tr>
+<th class="border px-2 py-1 bg-gray-100">Column</th>
+<th class="border px-2 py-1 bg-gray-100">Type</th>
+<th class="border px-2 py-1 bg-gray-100">Flags</th>
+<th class="border px-2 py-1 bg-gray-100">Default</th>
+<th class="border px-2 py-1 bg-gray-100">Check</th>
+</tr></thead><tbody>`
 				for _, col := range finalTable.Columns {
 					flags := ""
 					if col.PrimaryKey {
-						flags += `<span class="flag-badge flag-pk">PK</span>`
+						flags += `<span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs mr-1">PK</span>`
 					}
 					if col.AutoIncrement {
-						flags += `<span class="flag-badge flag-ai">AI</span>`
+						flags += `<span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs mr-1">AI</span>`
 					}
 					if col.Unique {
-						flags += `<span class="flag-badge flag-unique">Unique</span>`
+						flags += `<span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs mr-1">Unique</span>`
 					}
 					if col.Index {
-						flags += `<span class="flag-badge flag-index">Index</span>`
+						flags += `<span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs mr-1">Index</span>`
 					}
 					if col.Nullable {
-						flags += `<span class="flag-badge flag-null">Nullable</span>`
+						flags += `<span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs mr-1">Nullable</span>`
 					}
 					structureHTML += `<tr>
-<td>` + col.Name + `</td>
-<td><code>` + col.Type + `</code></td>
-<td>` + flags + `</td>
-<td>` + func() string {
+<td class="border px-2 py-1">` + col.Name + `</td>
+<td class="border px-2 py-1"><code>` + col.Type + `</code></td>
+<td class="border px-2 py-1">` + flags + `</td>
+<td class="border px-2 py-1">` + func() string {
 						if col.Default != nil && col.Default != "" {
-							return `<span class="flag-badge flag-default">` + fmt.Sprintf("%v", col.Default) + `</span>`
+							return `<span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">` + fmt.Sprintf("%v", col.Default) + `</span>`
 						}
 						return ""
 					}() + `</td>
-<td>` + func() string {
+<td class="border px-2 py-1">` + func() string {
 						if col.Check != "" {
-							return `<span class="flag-badge flag-check">` + col.Check + `</span>`
+							return `<span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">` + col.Check + `</span>`
 						}
 						return ""
 					}() + `</td>
 </tr>`
 				}
-				structureHTML += `</table>`
+				structureHTML += `</tbody></table>`
 				if len(finalTable.PrimaryKey) > 0 {
-					structureHTML += `<div style="margin-top:1em;"><b>Primary Key:</b> <span class="flag-badge flag-pk">` + strings.Join(finalTable.PrimaryKey, ", ") + `</span></div>`
+					structureHTML += `<div class="mt-4"><b>Primary Key:</b> <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs ml-2">` + strings.Join(finalTable.PrimaryKey, ", ") + `</span></div>`
 				}
 			} else {
 				structureHTML += `<b>Object does not exist (dropped).</b>`
