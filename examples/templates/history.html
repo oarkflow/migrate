@@ -63,7 +63,71 @@
             {{range $ch := $group.Actions}}
             <div class="event mb-4">
               <div class="op text-blue-600 font-medium">{{$ch.Operation}}</div>
-              <div class="details mt-1 text-gray-700">{{safeHTML $ch.Details}}</div>
+              <div class="details mt-1 text-gray-700">
+                {{- if eq $ch.Operation "AddColumn" -}}
+                  <b>{{ $ch.Column.Name }}</b> <code>{{ $ch.Column.Type }}</code>
+                  {{if $ch.Column.PrimaryKey}} <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs">PK</span>{{end}}
+                  {{if $ch.Column.AutoIncrement}} <span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs">AI</span>{{end}}
+                  {{if $ch.Column.Unique}} <span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs">Unique</span>{{end}}
+                  {{if $ch.Column.Index}} <span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs">Index</span>{{end}}
+                  {{if $ch.Column.Nullable}} <span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs">Nullable</span>{{end}}
+                  {{if $ch.Column.Default}} <span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">Default: {{$ch.Column.Default}}</span>{{end}}
+                  {{if $ch.Column.Check}} <span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">Check: {{$ch.Column.Check}}</span>{{end}}
+                {{- else if eq $ch.Operation "DropColumn" -}}
+                  Dropped column: <b>{{ $ch.DropColumn.Name }}</b>
+                {{- else if eq $ch.Operation "RenameColumn" -}}
+                  Renamed column: <b>{{ $ch.RenameColumn.From }}</b> to <b>{{ $ch.RenameColumn.To }}</b>
+                {{- else if eq $ch.Operation "CreateTable" -}}
+                  <b>Table created:</b>
+                  <ul>
+                  {{range $col := $ch.CreateTable.Columns}}
+                    <li>
+                      <b>{{ $col.Name }}</b> <code>{{ $col.Type }}</code>
+                      {{if $col.PrimaryKey}} <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs">PK</span>{{end}}
+                      {{if $col.AutoIncrement}} <span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs">AI</span>{{end}}
+                      {{if $col.Unique}} <span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs">Unique</span>{{end}}
+                      {{if $col.Index}} <span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs">Index</span>{{end}}
+                      {{if $col.Nullable}} <span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs">Nullable</span>{{end}}
+                      {{if $col.Default}} <span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">Default: {{$col.Default}}</span>{{end}}
+                      {{if $col.Check}} <span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">Check: {{$col.Check}}</span>{{end}}
+                    </li>
+                  {{end}}
+                  </ul>
+                  {{if $ch.CreateTable.PrimaryKey}}
+                    <b>Primary Key:</b> {{join $ch.CreateTable.PrimaryKey ", "}}
+                  {{end}}
+                {{- else if eq $ch.Operation "DropTable" -}}
+                  Table dropped
+                {{- else if eq $ch.Operation "CreateView" -}}
+                  <b>Name:</b> {{$ch.CreateView.Name}}<br>
+                  <b>Definition:</b><pre>{{$ch.CreateView.Definition}}</pre>
+                {{- else if eq $ch.Operation "DropView" -}}
+                  View dropped
+                {{- else if eq $ch.Operation "RenameView" -}}
+                  Renamed view: <b>{{$ch.RenameColumn.From}}</b> to <b>{{$ch.RenameColumn.To}}</b>
+                {{- else if eq $ch.Operation "CreateFunction" -}}
+                  <b>Name:</b> {{$ch.CreateFunction.Name}}<br>
+                  <b>Definition:</b><pre>{{$ch.CreateFunction.Definition}}</pre>
+                {{- else if eq $ch.Operation "DropFunction" -}}
+                  Function dropped
+                {{- else if eq $ch.Operation "RenameFunction" -}}
+                  Renamed function
+                {{- else if eq $ch.Operation "CreateProcedure" -}}
+                  <b>Name:</b> {{$ch.CreateProcedure.Name}}<br>
+                  <b>Definition:</b><pre>{{$ch.CreateProcedure.Definition}}</pre>
+                {{- else if eq $ch.Operation "DropProcedure" -}}
+                  Procedure dropped
+                {{- else if eq $ch.Operation "RenameProcedure" -}}
+                  Renamed procedure
+                {{- else if eq $ch.Operation "CreateTrigger" -}}
+                  <b>Name:</b> {{$ch.CreateTrigger.Name}}<br>
+                  <b>Definition:</b><pre>{{$ch.CreateTrigger.Definition}}</pre>
+                {{- else if eq $ch.Operation "DropTrigger" -}}
+                  Trigger dropped
+                {{- else if eq $ch.Operation "RenameTrigger" -}}
+                  Renamed trigger
+                {{- end}}
+              </div>
             </div>
             {{end}}
           </div>
@@ -71,7 +135,77 @@
         {{end}}
       {{end}}
       `,
-    structure: `{{with $rep := index $.Reports $obj.Name}}{{.StructureHTML}}{{end}}`
+    structure: `
+      {{with $rep := index $.Reports $obj.Name}}
+        <h2 class="mt-0 text-xl font-bold">Final Structure</h2>
+        <div class="mb-4">
+        {{if eq $rep.Type "table"}}
+          {{if $rep.FinalTable}}
+            <table class="min-w-full border border-gray-300 mb-2 text-sm"><thead><tr>
+              <th class="border px-2 py-1 bg-gray-100">Column</th>
+              <th class="border px-2 py-1 bg-gray-100">Type</th>
+              <th class="border px-2 py-1 bg-gray-100">Flags</th>
+              <th class="border px-2 py-1 bg-gray-100">Default</th>
+              <th class="border px-2 py-1 bg-gray-100">Check</th>
+            </tr></thead><tbody>
+            {{range $col := $rep.FinalTable.Columns}}
+              <tr>
+                <td class="border px-2 py-1">{{$col.Name}}</td>
+                <td class="border px-2 py-1"><code>{{$col.Type}}</code></td>
+                <td class="border px-2 py-1">
+                  {{if $col.PrimaryKey}}<span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs mr-1">PK</span>{{end}}
+                  {{if $col.AutoIncrement}}<span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs mr-1">AI</span>{{end}}
+                  {{if $col.Unique}}<span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs mr-1">Unique</span>{{end}}
+                  {{if $col.Index}}<span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs mr-1">Index</span>{{end}}
+                  {{if $col.Nullable}}<span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs mr-1">Nullable</span>{{end}}
+                </td>
+                <td class="border px-2 py-1">
+                  {{if $col.Default}}<span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">{{$col.Default}}</span>{{end}}
+                </td>
+                <td class="border px-2 py-1">
+                  {{if $col.Check}}<span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">{{$col.Check}}</span>{{end}}
+                </td>
+              </tr>
+            {{end}}
+            </tbody></table>
+            {{if $rep.FinalTable.PrimaryKey}}
+              <div class="mt-4"><b>Primary Key:</b> <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs ml-2">{{join $rep.FinalTable.PrimaryKey ", "}}</span></div>
+            {{end}}
+          {{else}}
+            <b>Object does not exist (dropped).</b>
+          {{end}}
+        {{else if eq $rep.Type "view"}}
+          {{if $rep.FinalView}}
+            <b>Name:</b> {{$rep.FinalView.Name}}<br>
+            <b>Definition:</b><pre>{{$rep.FinalView.Definition}}</pre>
+          {{else}}
+            <b>Object does not exist (dropped).</b>
+          {{end}}
+        {{else if eq $rep.Type "function"}}
+          {{if $rep.FinalFunction}}
+            <b>Name:</b> {{$rep.FinalFunction.Name}}<br>
+            <b>Definition:</b><pre>{{$rep.FinalFunction.Definition}}</pre>
+          {{else}}
+            <b>Object does not exist (dropped).</b>
+          {{end}}
+        {{else if eq $rep.Type "procedure"}}
+          {{if $rep.FinalProcedure}}
+            <b>Name:</b> {{$rep.FinalProcedure.Name}}<br>
+            <b>Definition:</b><pre>{{$rep.FinalProcedure.Definition}}</pre>
+          {{else}}
+            <b>Object does not exist (dropped).</b>
+          {{end}}
+        {{else if eq $rep.Type "trigger"}}
+          {{if $rep.FinalTrigger}}
+            <b>Name:</b> {{$rep.FinalTrigger.Name}}<br>
+            <b>Definition:</b><pre>{{$rep.FinalTrigger.Definition}}</pre>
+          {{else}}
+            <b>Object does not exist (dropped).</b>
+          {{end}}
+        {{end}}
+        </div>
+      {{end}}
+    `
   };
   {{end}}
 

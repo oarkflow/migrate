@@ -41,10 +41,19 @@ func (c *HistoryCommand) Extend() contracts.Extend {
 }
 
 type MigrationChange struct {
-	MigrationName string
-	Date          time.Time
-	Operation     string
-	Details       string
+	MigrationName   string
+	Date            time.Time
+	Operation       string
+	Details         string // Now just raw details, not HTML
+	Column          *AddColumn
+	DropColumn      *DropColumn
+	RenameColumn    *RenameColumn
+	CreateTable     *CreateTable
+	CreateView      *CreateView
+	CreateFunction  *CreateFunction
+	CreateProcedure *CreateProcedure
+	CreateTrigger   *CreateTrigger
+	// ...add more as needed for richer template rendering...
 }
 
 // Add MigrationGroup type definition
@@ -218,10 +227,15 @@ func describeTrigger(ct CreateTrigger) string {
 }
 
 type ObjectReport struct {
-	Name          string
-	Type          string
-	History       []MigrationGroup
-	StructureHTML template.HTML
+	Name           string
+	Type           string
+	History        []MigrationGroup
+	FinalTable     *CreateTable
+	FinalView      *CreateView
+	FinalFunction  *CreateFunction
+	FinalProcedure *CreateProcedure
+	FinalTrigger   *CreateTrigger
+	Dropped        bool
 }
 
 type HistoryReportTemplateData struct {
@@ -265,7 +279,8 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "CreateTable",
-						Details:       describeTableColumns(ct.Columns, ct.PrimaryKey),
+						Details:       "", // No HTML, just mark type
+						CreateTable:   &ct,
 					})
 					cpy := ct
 					finalTable = &cpy
@@ -279,7 +294,8 @@ func generateHTMLReportAllObjectsTemplate(
 							MigrationName: m.Name,
 							Date:          createdAt,
 							Operation:     "AddColumn",
-							Details:       describeColumn(ac),
+							Details:       "",
+							Column:        &ac,
 						})
 						finalTable.Columns = append(finalTable.Columns, ac)
 					}
@@ -288,7 +304,8 @@ func generateHTMLReportAllObjectsTemplate(
 							MigrationName: m.Name,
 							Date:          createdAt,
 							Operation:     "DropColumn",
-							Details:       fmt.Sprintf("Dropped column: <b>%s</b>", dc.Name),
+							Details:       "",
+							DropColumn:    &dc,
 						})
 						if finalTable != nil {
 							var newCols []AddColumn
@@ -305,7 +322,8 @@ func generateHTMLReportAllObjectsTemplate(
 							MigrationName: m.Name,
 							Date:          createdAt,
 							Operation:     "RenameColumn",
-							Details:       fmt.Sprintf("Renamed column: <b>%s</b> to <b>%s</b>", rc.From, rc.To),
+							Details:       "",
+							RenameColumn:  &rc,
 						})
 						if finalTable != nil {
 							for i, col := range finalTable.Columns {
@@ -323,7 +341,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "DropTable",
-						Details:       "Table dropped",
+						Details:       "",
 					})
 					finalTable = nil
 					dropped = true
@@ -336,7 +354,8 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "CreateView",
-						Details:       describeView(cv),
+						Details:       "",
+						CreateView:    &cv,
 					})
 					cpy := cv
 					finalView = &cpy
@@ -348,7 +367,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "DropView",
-						Details:       "View dropped",
+						Details:       "",
 					})
 					finalView = nil
 				}
@@ -359,7 +378,8 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "RenameView",
-						Details:       fmt.Sprintf("Renamed view: <b>%s</b> to <b>%s</b>", rv.OldName, rv.NewName),
+						Details:       "",
+						RenameColumn:  nil, // Not used for views
 					})
 					if finalView != nil {
 						finalView.Name = rv.NewName
@@ -370,10 +390,11 @@ func generateHTMLReportAllObjectsTemplate(
 			for _, cf := range m.Up.CreateFunction {
 				if strings.EqualFold(cf.Name, obj.Name) {
 					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "CreateFunction",
-						Details:       describeFunction(cf),
+						MigrationName:  m.Name,
+						Date:           createdAt,
+						Operation:      "CreateFunction",
+						Details:        "",
+						CreateFunction: &cf,
 					})
 					cpy := cf
 					finalFunction = &cpy
@@ -385,7 +406,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "DropFunction",
-						Details:       "Function dropped",
+						Details:       "",
 					})
 					finalFunction = nil
 				}
@@ -396,7 +417,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "RenameFunction",
-						Details:       fmt.Sprintf("Renamed function: <b>%s</b> to <b>%s</b>", rf.OldName, rf.NewName),
+						Details:       "",
 					})
 					if finalFunction != nil {
 						finalFunction.Name = rf.NewName
@@ -407,10 +428,11 @@ func generateHTMLReportAllObjectsTemplate(
 			for _, cp := range m.Up.CreateProcedure {
 				if strings.EqualFold(cp.Name, obj.Name) {
 					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "CreateProcedure",
-						Details:       describeProcedure(cp),
+						MigrationName:   m.Name,
+						Date:            createdAt,
+						Operation:       "CreateProcedure",
+						Details:         "",
+						CreateProcedure: &cp,
 					})
 					cpy := cp
 					finalProcedure = &cpy
@@ -422,7 +444,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "DropProcedure",
-						Details:       "Procedure dropped",
+						Details:       "",
 					})
 					finalProcedure = nil
 				}
@@ -433,7 +455,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "RenameProcedure",
-						Details:       fmt.Sprintf("Renamed procedure: <b>%s</b> to <b>%s</b>", rp.OldName, rp.NewName),
+						Details:       "",
 					})
 					if finalProcedure != nil {
 						finalProcedure.Name = rp.NewName
@@ -447,7 +469,8 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "CreateTrigger",
-						Details:       describeTrigger(ct),
+						Details:       "",
+						CreateTrigger: &ct,
 					})
 					cpy := ct
 					finalTrigger = &cpy
@@ -459,7 +482,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "DropTrigger",
-						Details:       "Trigger dropped",
+						Details:       "",
 					})
 					finalTrigger = nil
 				}
@@ -470,7 +493,7 @@ func generateHTMLReportAllObjectsTemplate(
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "RenameTrigger",
-						Details:       fmt.Sprintf("Renamed trigger: <b>%s</b> to <b>%s</b>", rt.OldName, rt.NewName),
+						Details:       "",
 					})
 					if finalTrigger != nil {
 						finalTrigger.Name = rt.NewName
@@ -498,93 +521,16 @@ func generateHTMLReportAllObjectsTemplate(
 			history = append(history, *migrationMap[key])
 		}
 
-		// Structure HTML
-		var structureHTML string
-		structureHTML += `<h2 class="mt-0 text-xl font-bold">Final Structure</h2><div class="mb-4">`
-		switch obj.Type {
-		case "table":
-			if finalTable != nil {
-				structureHTML += `<table class="min-w-full border border-gray-300 mb-2 text-sm"><thead><tr>
-<th class="border px-2 py-1 bg-gray-100">Column</th>
-<th class="border px-2 py-1 bg-gray-100">Type</th>
-<th class="border px-2 py-1 bg-gray-100">Flags</th>
-<th class="border px-2 py-1 bg-gray-100">Default</th>
-<th class="border px-2 py-1 bg-gray-100">Check</th>
-</tr></thead><tbody>`
-				for _, col := range finalTable.Columns {
-					flags := ""
-					if col.PrimaryKey {
-						flags += `<span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs mr-1">PK</span>`
-					}
-					if col.AutoIncrement {
-						flags += `<span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs mr-1">AI</span>`
-					}
-					if col.Unique {
-						flags += `<span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs mr-1">Unique</span>`
-					}
-					if col.Index {
-						flags += `<span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs mr-1">Index</span>`
-					}
-					if col.Nullable {
-						flags += `<span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs mr-1">Nullable</span>`
-					}
-					structureHTML += `<tr>
-<td class="border px-2 py-1">` + col.Name + `</td>
-<td class="border px-2 py-1"><code>` + col.Type + `</code></td>
-<td class="border px-2 py-1">` + flags + `</td>
-<td class="border px-2 py-1">` + func() string {
-						if col.Default != nil && col.Default != "" {
-							return `<span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">` + fmt.Sprintf("%v", col.Default) + `</span>`
-						}
-						return ""
-					}() + `</td>
-<td class="border px-2 py-1">` + func() string {
-						if col.Check != "" {
-							return `<span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">` + col.Check + `</span>`
-						}
-						return ""
-					}() + `</td>
-</tr>`
-				}
-				structureHTML += `</tbody></table>`
-				if len(finalTable.PrimaryKey) > 0 {
-					structureHTML += `<div class="mt-4"><b>Primary Key:</b> <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs ml-2">` + strings.Join(finalTable.PrimaryKey, ", ") + `</span></div>`
-				}
-			} else {
-				structureHTML += `<b>Object does not exist (dropped).</b>`
-			}
-		case "view":
-			if finalView != nil {
-				structureHTML += describeView(*finalView)
-			} else {
-				structureHTML += `<b>Object does not exist (dropped).</b>`
-			}
-		case "function":
-			if finalFunction != nil {
-				structureHTML += describeFunction(*finalFunction)
-			} else {
-				structureHTML += `<b>Object does not exist (dropped).</b>`
-			}
-		case "procedure":
-			if finalProcedure != nil {
-				structureHTML += describeProcedure(*finalProcedure)
-			} else {
-				structureHTML += `<b>Object does not exist (dropped).</b>`
-			}
-		case "trigger":
-			if finalTrigger != nil {
-				structureHTML += describeTrigger(*finalTrigger)
-			} else {
-				structureHTML += `<b>Object does not exist (dropped).</b>`
-			}
-		}
-		structureHTML += `</div>`
-
 		reports[obj.Name] = ObjectReport{
-			Name:          obj.Name,
-			Type:          obj.Type,
-			History:       history,
-			StructureHTML: template.HTML(structureHTML),
+			Name:           obj.Name,
+			Type:           obj.Type,
+			History:        history,
+			FinalTable:     finalTable,
+			FinalView:      finalView,
+			FinalFunction:  finalFunction,
+			FinalProcedure: finalProcedure,
+			FinalTrigger:   finalTrigger,
+			Dropped:        dropped,
 		}
 	}
 
@@ -593,6 +539,7 @@ func generateHTMLReportAllObjectsTemplate(
 	tmpl, err := template.New("history.html").
 		Funcs(template.FuncMap{
 			"safeHTML": func(s string) template.HTML { return template.HTML(s) },
+			"join":     strings.Join, // Add join helper for template
 		}).
 		ParseFiles(tmplPath)
 	if err != nil {
@@ -605,7 +552,6 @@ func generateHTMLReportAllObjectsTemplate(
 	}
 
 	var buf bytes.Buffer
-	// Use the base name of the template file for ExecuteTemplate
 	if err := tmpl.ExecuteTemplate(&buf, "history.html", data); err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
