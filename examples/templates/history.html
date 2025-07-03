@@ -23,17 +23,6 @@
   </style>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans text-sm">
-<!-- Header -->
-<header class="bg-white shadow-sm">
-  <div class="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between">
-    <h1 class="text-lg font-semibold tracking-tight">History Report: All Objects</h1>
-    <button id="sidebar-toggle" class="sm:hidden p-2 rounded hover:bg-gray-200 focus:outline-none" aria-label="Toggle sidebar">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
-      </svg>
-    </button>
-  </div>
-</header>
 
 <div class="flex h-screen overflow-hidden">
   <!-- Sidebar -->
@@ -55,14 +44,29 @@
   <!-- Main Content -->
   <main class="flex-1 flex flex-col overflow-hidden">
     <div class="flex-1 flex flex-col sm:flex-row overflow-auto">
-      <!-- History Column -->
-      <section id="history-panel" class="sm:w-1/2 p-3 bg-gray-50 overflow-y-auto space-y-2 border-r border-gray-200">
-        <!-- Dynamically injected accordions -->
-      </section>
-
-      <!-- Structure Column -->
-      <section id="structure-panel" class="sm:w-1/2 p-3 bg-white overflow-y-auto">
-        <!-- Dynamically injected structure HTML -->
+      <!-- Structure/History Tabs Column -->
+      <section class="sm:w-full p-3 bg-white overflow-y-auto">
+        <!-- Tabs Header -->
+        <div class="border-b border-gray-200 mb-4 flex items-center justify-between">
+          <div class="flex space-x-2" id="tab-buttons">
+            <button id="tab-structure-btn" class="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-t border border-b-0 border-gray-200 focus:outline-none" data-tab="structure" type="button">
+              Final Structure
+            </button>
+            <button id="tab-history-btn" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white rounded-t border border-b-0 border-gray-200 focus:outline-none" data-tab="history" type="button">
+              History
+            </button>
+          </div>
+          <button id="sidebar-toggle" class="sm:hidden p-2 rounded hover:bg-gray-200 focus:outline-none" aria-label="Toggle sidebar">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+          </button>
+        </div>
+        <!-- Tabs Content -->
+        <div>
+          <div id="structure-panel" class="tab-panel"></div>
+          <div id="history-panel" class="tab-panel hidden"></div>
+        </div>
       </section>
     </div>
   </main>
@@ -75,10 +79,10 @@
     history: `
       {{with $rep := index $.Reports $obj.Name}}
         {{range $idx, $group := $rep.History}}
-        <div class="accordion border border-gray-200 rounded shadow-sm overflow-hidden {{if eq $idx 0}}open{{end}}">
-          <button class="accordion-header flex flex-col w-full text-left px-3 py-2 bg-gray-100 hover:bg-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400 transition" aria-expanded="false">
+        <div class="accordion border border-gray-200 rounded shadow-sm overflow-hidden {{if eq $idx 0}}open{{end}} mb-2">
+          <button class="accordion-header flex flex-col w-full text-left px-3 py-2 bg-gray-100 hover:bg-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400 transition {{if eq $idx 0}}!bg-blue-50{{end}}" aria-expanded="false">
             <span class="text-base font-semibold text-gray-800">{{$group.MigrationName}}</span>
-            <span class="text-xs text-gray-500 mt-0.5">{{$group.Date.Format "Mon, 02 Jan 2006 15:04:05 MST"}}</span>
+            <span class="text-xs text-gray-500 mt-0.5">{{$group.Date.Format "2006-01-02 15:04:05"}}</span>
           </button>
           <div class="accordion-content px-3 py-2 hidden bg-white text-sm">
             {{range $ch := $group.Actions}}
@@ -158,7 +162,6 @@
       `,
     structure: `
       {{with $rep := index $.Reports $obj.Name}}
-        <h2 class="mt-0 text-base font-bold">Final Structure</h2>
         <div class="mb-2">
         {{if eq $rep.Type "table"}}
           {{if $rep.FinalTable}}
@@ -240,10 +243,16 @@
     container.querySelectorAll('.accordion-header').forEach(header => {
       header.addEventListener('click', () => {
         container.querySelectorAll('.accordion-content').forEach(c => c.classList.add('hidden'));
-        container.querySelectorAll('.accordion').forEach(a => a.classList.remove('open'));
+        container.querySelectorAll('.accordion').forEach(a => {
+          a.classList.remove('open');
+          a.querySelector('.accordion-header').classList.remove('!bg-blue-50');
+        });
         const panel = header.nextElementSibling;
         panel.classList.toggle('hidden');
         header.parentElement.classList.toggle('open');
+        if (header.parentElement.classList.contains('open')) {
+          header.classList.add('!bg-blue-50');
+        }
       });
     });
     // Open first by default
@@ -253,8 +262,31 @@
     } else if (first) {
       first.querySelector('.accordion-content').classList.remove('hidden');
       first.classList.add('open');
+      first.querySelector('.accordion-header').classList.add('!bg-blue-50');
     }
   }
+
+  function showTab(tab) {
+    document.getElementById('tab-structure-btn').classList.toggle('bg-blue-50', tab === 'structure');
+    document.getElementById('tab-structure-btn').classList.toggle('text-blue-700', tab === 'structure');
+    document.getElementById('tab-structure-btn').classList.toggle('bg-white', tab !== 'structure');
+    document.getElementById('tab-structure-btn').classList.toggle('text-gray-700', tab !== 'structure');
+
+    document.getElementById('tab-history-btn').classList.toggle('bg-blue-50', tab === 'history');
+    document.getElementById('tab-history-btn').classList.toggle('text-blue-700', tab === 'history');
+    document.getElementById('tab-history-btn').classList.toggle('bg-white', tab !== 'history');
+    document.getElementById('tab-history-btn').classList.toggle('text-gray-700', tab !== 'history');
+
+    document.getElementById('structure-panel').classList.toggle('hidden', tab !== 'structure');
+    document.getElementById('history-panel').classList.toggle('hidden', tab !== 'history');
+  }
+
+  document.getElementById('tab-structure-btn').addEventListener('click', function() {
+    showTab('structure');
+  });
+  document.getElementById('tab-history-btn').addEventListener('click', function() {
+    showTab('history');
+  });
 
   function selectObject(objName) {
     document.querySelectorAll('#object-list li').forEach(li => {
@@ -289,10 +321,11 @@
     this.classList.add('hidden');
   });
 
-  // Auto-select first object
+  // Auto-select first object and default to "Final Structure" tab
   document.addEventListener('DOMContentLoaded', () => {
     const keys = Object.keys(reports);
     if (keys.length) selectObject(keys[0]);
+    showTab('structure');
   });
 </script>
 </body>

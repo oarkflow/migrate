@@ -154,7 +154,22 @@ func extractTimeFromFilename(fname string) time.Time {
 	return time.Time{}
 }
 
+func sortColumnsPriority(cols []AddColumn) []AddColumn {
+	// Columns with PrimaryKey or AutoIncrement come first, preserving their original order
+	var pri []AddColumn
+	var rest []AddColumn
+	for _, c := range cols {
+		if c.PrimaryKey || c.AutoIncrement {
+			pri = append(pri, c)
+		} else {
+			rest = append(rest, c)
+		}
+	}
+	return append(pri, rest...)
+}
+
 func describeTableColumns(cols []AddColumn, pk []string) string {
+	cols = sortColumnsPriority(cols)
 	var lines []string
 	for _, c := range cols {
 		lines = append(lines, describeColumn(c))
@@ -275,14 +290,17 @@ func generateHTMLReportAllObjectsTemplate(
 			// TABLES
 			for _, ct := range m.Up.CreateTable {
 				if strings.EqualFold(ct.Name, obj.Name) {
+					// Sort columns for CreateTable in history
+					sortedCT := ct
+					sortedCT.Columns = sortColumnsPriority(sortedCT.Columns)
 					changes = append(changes, MigrationChange{
 						MigrationName: m.Name,
 						Date:          createdAt,
 						Operation:     "CreateTable",
-						Details:       "", // No HTML, just mark type
-						CreateTable:   &ct,
+						Details:       "",
+						CreateTable:   &sortedCT,
 					})
-					cpy := ct
+					cpy := sortedCT
 					finalTable = &cpy
 					dropped = false
 				}
@@ -298,6 +316,7 @@ func generateHTMLReportAllObjectsTemplate(
 							Column:        &ac,
 						})
 						finalTable.Columns = append(finalTable.Columns, ac)
+						finalTable.Columns = sortColumnsPriority(finalTable.Columns)
 					}
 					for _, dc := range at.DropColumn {
 						changes = append(changes, MigrationChange{
@@ -314,7 +333,7 @@ func generateHTMLReportAllObjectsTemplate(
 									newCols = append(newCols, col)
 								}
 							}
-							finalTable.Columns = newCols
+							finalTable.Columns = sortColumnsPriority(newCols)
 						}
 					}
 					for _, rc := range at.RenameColumn {
@@ -331,6 +350,7 @@ func generateHTMLReportAllObjectsTemplate(
 									finalTable.Columns[i].Name = rc.To
 								}
 							}
+							finalTable.Columns = sortColumnsPriority(finalTable.Columns)
 						}
 					}
 				}
