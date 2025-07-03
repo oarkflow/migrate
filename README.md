@@ -20,6 +20,7 @@
 - **migration:reset:** Resets migrations by rolling back all applied migrations.
 - **migration:validate:** Validates the applied migration history against the migration files.
 - **db:seed:** Runs seed files to populate tables, with optional truncation.
+- **history:** Report on entire changes on an object across all migrations.
 
 ## Effectiveness
 - **Reliability:** Ensures migrations are applied safely using checksum comparison and transactional operations.
@@ -153,3 +154,15 @@ Command:
 ```
 $ go run main.go cli migration:validate
 ```
+
+### Generate Migration History Report
+Command:
+```
+$ go run main.go cli history [--object=users] [--serve=true]
+```
+
+#### Final Structure
+![alt text](/assets/structure.png)
+
+#### History
+![alt text](/assets/history.png)
