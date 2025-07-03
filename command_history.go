@@ -1,7 +1,9 @@
 package migrate
 
 import (
+	"bytes"
 	"fmt"
+	"html/template"
 	"os"
 	"path/filepath"
 	"sort"
@@ -72,8 +74,7 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	}
 	sort.Strings(fileNames)
 
-	// Collect all objects (tables, views, functions, procedures, triggers)
-	objectSet := make(map[string]string) // name -> type
+	objectSet := make(map[string]string)
 	for _, fname := range fileNames {
 		path := filepath.Join(c.Driver.MigrationDir(), fname)
 		data, err := os.ReadFile(path)
@@ -117,7 +118,10 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 		allObjects = append(allObjects, objectInfo{Name: objectName, Type: typ})
 	}
 
-	report := generateHTMLReportAllObjects(allObjects, fileNames, c.Driver.MigrationDir())
+	report, err := generateHTMLReportAllObjectsTemplate(allObjects, fileNames, c.Driver.MigrationDir())
+	if err != nil {
+		return err
+	}
 	reportPath := filepath.Join(".", fmt.Sprintf("history_%s_%d.html", func() string {
 		if objectName == "" {
 			return "all"
@@ -204,22 +208,26 @@ func describeTrigger(ct CreateTrigger) string {
 	return fmt.Sprintf("<b>Name:</b> %s<br><b>Definition:</b><pre>%s</pre>", ct.Name, ct.Definition)
 }
 
-// 3-column layout for all objects
-func generateHTMLReportAllObjects(
+type ObjectReport struct {
+	Name          string
+	Type          string
+	History       []MigrationGroup
+	StructureHTML template.HTML
+}
+
+type HistoryReportTemplateData struct {
+	AllObjects []objectInfo
+	Reports    map[string]ObjectReport
+}
+
+// Main template-based report generator
+func generateHTMLReportAllObjectsTemplate(
 	allObjects []objectInfo,
 	fileNames []string,
 	migrationDir string,
-) string {
-	// Prepare per-object history and structure
-	type ObjectReport struct {
-		Name          string
-		Type          string
-		HistoryHTML   string
-		StructureHTML string
-	}
+) (string, error) {
 	reports := make(map[string]ObjectReport)
 	for _, obj := range allObjects {
-		// Collect changes and structure for each object
 		var changes []MigrationChange
 		var finalTable *CreateTable
 		var dropped bool
@@ -476,35 +484,14 @@ func generateHTMLReportAllObjects(
 			}
 			migrationMap[key].Actions = append(migrationMap[key].Actions, ch)
 		}
-
-		// History HTML
-		historyHTML := `<div id="history-accordion-` + obj.Name + `">`
-		for idx, key := range migrationOrder {
-			group := migrationMap[key]
-			historyHTML += `<div class="accordion` + func() string {
-				if idx == 0 {
-					return " active"
-				}
-				return ""
-			}() + `">
-  <div class="accordion-header" style="display:flex;flex-direction:column;align-items:flex-start;">
-    <span class="accordion-title" style="font-weight:bold;color:#111;font-size:1.1em;">` + group.MigrationName + `</span>
-    <span class="accordion-date" style="color:#888;font-size:0.95em;margin-top:0.2em;">` + group.Date.Format(time.RFC1123) + `</span>
-  </div>
-  <div class="accordion-content">`
-			for _, ch := range group.Actions {
-				historyHTML += `<div class="event">
-  <div class="op">` + ch.Operation + `</div>
-  <div class="details">` + ch.Details + `</div>
-</div>
-`
-			}
-			historyHTML += `</div></div>`
+		var history []MigrationGroup
+		for _, key := range migrationOrder {
+			history = append(history, *migrationMap[key])
 		}
-		historyHTML += `</div>`
 
 		// Structure HTML
-		structureHTML := `<h2 style="margin-top:0;">Final Structure</h2><div class="final-structure">`
+		var structureHTML string
+		structureHTML += `<h2 style="margin-top:0;">Final Structure</h2><div class="final-structure">`
 		switch obj.Type {
 		case "table":
 			if finalTable != nil {
@@ -581,113 +568,31 @@ func generateHTMLReportAllObjects(
 		reports[obj.Name] = ObjectReport{
 			Name:          obj.Name,
 			Type:          obj.Type,
-			HistoryHTML:   historyHTML,
-			StructureHTML: structureHTML,
+			History:       history,
+			StructureHTML: template.HTML(structureHTML),
 		}
 	}
 
-	// Build the 3-column layout
-	html := `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>History Report - All Objects</title>
-<style>
-body { font-family: Arial, sans-serif; margin: 0; background: #f8f9fa; }
-h1 { color: #333; }
-.layout3col { display: flex; flex-direction: row; height: 100vh; }
-.sidebar { width: 260px; background: #222; color: #fff; padding: 0; overflow-y: auto; }
-.sidebar h2 { font-size: 1.2em; margin: 0; padding: 1em 1em 0.5em 1em; color: #fff; }
-.sidebar ul { list-style: none; margin: 0; padding: 0; }
-.sidebar li { padding: 0.8em 1em; cursor: pointer; border-bottom: 1px solid #333; }
-.sidebar li.active, .sidebar li:hover { background: #007bff; color: #fff; }
-.main-content { flex: 1; display: flex; flex-direction: row; }
-.history-col { flex: 1.2; padding: 2em; overflow-y: auto; border-right: 1px solid #eee; background: #f8f9fa; }
-.structure-col { flex: 1; padding: 2em; overflow-y: auto; background: #fff; }
-.accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
-.accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; }
-.accordion-title { font-weight: bold; color: #111; font-size: 1.1em; }
-.accordion-date { color: #888; font-size: 0.95em; margin-top: 0.2em; }
-.accordion-content { display: none; padding: 1em; }
-.accordion.active .accordion-content { display: block; }
-.accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
-.accordion.active .accordion-header:after { transform: rotate(-180deg); }
-.event { margin-bottom: 1.5em; }
-.event .op { font-weight: bold; color: #007bff; }
-.event .details { margin-bottom: 0.5em; }
-.event .migration { color: #888; font-size: 0.95em; }
-.final-structure { background: #fff; border: 1px solid #ddd; padding: 1.5em 1em 1em 1em; border-radius: 8px; margin-top: 1em; }
-.structure-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-.structure-table th, .structure-table td { padding: 0.6em 1em; border-bottom: 1px solid #eee; text-align: left; }
-.structure-table th { background: #f1f3f4; }
-.flag-badge { display: inline-block; margin-right: 0.3em; margin-bottom: 0.1em; padding: 2px 7px; border-radius: 4px; font-size: 0.85em; font-weight: 500; }
-.flag-pk { background: #007bff; color: #fff; }
-.flag-ai { background: #28a745; color: #fff; }
-.flag-unique { background: #ffc107; color: #333; }
-.flag-index { background: #6c757d; color: #fff; }
-.flag-null { background: #17a2b8; color: #fff; }
-.flag-default { background: #e83e8c; color: #fff; }
-.flag-check { background: #fd7e14; color: #fff; }
-@media (max-width: 900px) {
-	.layout3col { flex-direction: column; }
-	.sidebar { width: 100%; }
-	.main-content { flex-direction: column; }
-	.history-col, .structure-col { padding: 1em; }
-}
-</style>
-</head>
-<body>
-<h1 style="margin:1em 2em 0 2em;">History Report: All Objects</h1>
-<div class="layout3col">
-	<div class="sidebar">
-		<h2>Objects</h2>
-		<ul id="object-list">`
-	for _, obj := range allObjects {
-		html += `<li data-obj="` + obj.Name + `" class="">` + obj.Name + ` <span style="font-size:0.85em;color:#aaa;">[` + obj.Type + `]</span></li>`
+	// Load and execute template
+	tmplPath := filepath.Join("templates/history.html")
+	tmpl, err := template.New("history.html").
+		Funcs(template.FuncMap{
+			"safeHTML": func(s string) template.HTML { return template.HTML(s) },
+		}).
+		ParseFiles(tmplPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
-	html += `</ul>
-	</div>
-	<div class="main-content">
-		<div class="history-col" id="history-panel"></div>
-		<div class="structure-col" id="structure-panel"></div>
-	</div>
-</div>
-<script>
-var reports = {};`
-	for _, obj := range allObjects {
-		rep := reports[obj.Name]
-		html += `
-reports["` + obj.Name + `"] = {
-	history: ` + "`" + rep.HistoryHTML + "`" + `,
-	structure: ` + "`" + rep.StructureHTML + "`" + `
-};`
+
+	data := HistoryReportTemplateData{
+		AllObjects: allObjects,
+		Reports:    reports,
 	}
-	html += `
-function selectObject(objName) {
-	document.querySelectorAll('#object-list li').forEach(function(li) {
-		li.classList.remove('active');
-		if (li.getAttribute('data-obj') === objName) li.classList.add('active');
-	});
-	document.getElementById('history-panel').innerHTML = reports[objName].history;
-	document.getElementById('structure-panel').innerHTML = reports[objName].structure;
-	// Activate accordions
-	document.querySelectorAll('.accordion-header').forEach(function(header) {
-		header.addEventListener('click', function() {
-			var acc = header.parentElement;
-			acc.classList.toggle('active');
-		});
-	});
-}
-document.querySelectorAll('#object-list li').forEach(function(li) {
-	li.addEventListener('click', function() {
-		selectObject(li.getAttribute('data-obj'));
-	});
-});
-if (Object.keys(reports).length > 0) {
-	selectObject(Object.keys(reports)[0]);
-}
-</script>
-</body>
-</html>`
-	return html
+
+	var buf bytes.Buffer
+	// Use the base name of the template file for ExecuteTemplate
+	if err := tmpl.ExecuteTemplate(&buf, "history.html", data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+	return buf.String(), nil
 }

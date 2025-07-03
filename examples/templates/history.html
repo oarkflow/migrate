@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>History Report - All Objects</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f8f9fa; }
+    h1 { color: #333; }
+    .layout3col { display: flex; flex-direction: row; height: 100vh; }
+    .sidebar { width: 260px; background: #222; color: #fff; padding: 0; overflow-y: auto; }
+    .sidebar h2 { font-size: 1.2em; margin: 0; padding: 1em 1em 0.5em 1em; color: #fff; }
+    .sidebar ul { list-style: none; margin: 0; padding: 0; }
+    .sidebar li { padding: 0.8em 1em; cursor: pointer; border-bottom: 1px solid #333; }
+    .sidebar li.active, .sidebar li:hover { background: #007bff; color: #fff; }
+    .main-content { flex: 1; display: flex; flex-direction: row; }
+    .history-col { flex: 1.2; padding: 2em; overflow-y: auto; border-right: 1px solid #eee; background: #f8f9fa; }
+    .structure-col { flex: 1; padding: 2em; overflow-y: auto; background: #fff; }
+    .accordion { background: #fff; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 1em; }
+    .accordion-header { cursor: pointer; padding: 1em; border-bottom: 1px solid #eee; background: #f1f3f4; }
+    .accordion-title { font-weight: bold; color: #111; font-size: 1.1em; }
+    .accordion-date { color: #888; font-size: 0.95em; margin-top: 0.2em; }
+    .accordion-content { display: none; padding: 1em; }
+    .accordion.active .accordion-content { display: block; }
+    .accordion-header:after { content: "▼"; float: right; transition: transform 0.2s; }
+    .accordion.active .accordion-header:after { transform: rotate(-180deg); }
+    .event { margin-bottom: 1.5em; }
+    .event .op { font-weight: bold; color: #007bff; }
+    .event .details { margin-bottom: 0.5em; }
+    .event .migration { color: #888; font-size: 0.95em; }
+    .final-structure { background: #fff; border: 1px solid #ddd; padding: 1.5em 1em 1em 1em; border-radius: 8px; margin-top: 1em; }
+    .structure-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .structure-table th, .structure-table td { padding: 0.6em 1em; border-bottom: 1px solid #eee; text-align: left; }
+    .structure-table th { background: #f1f3f4; }
+    .flag-badge { display: inline-block; margin-right: 0.3em; margin-bottom: 0.1em; padding: 2px 7px; border-radius: 4px; font-size: 0.85em; font-weight: 500; }
+    .flag-pk { background: #007bff; color: #fff; }
+    .flag-ai { background: #28a745; color: #fff; }
+    .flag-unique { background: #ffc107; color: #333; }
+    .flag-index { background: #6c757d; color: #fff; }
+    .flag-null { background: #17a2b8; color: #fff; }
+    .flag-default { background: #e83e8c; color: #fff; }
+    .flag-check { background: #fd7e14; color: #fff; }
+    @media (max-width: 900px) {
+      .layout3col { flex-direction: column; }
+      .sidebar { width: 100%; }
+      .main-content { flex-direction: column; }
+      .history-col, .structure-col { padding: 1em; }
+    }
+  </style>
+</head>
+<body>
+<h1 style="margin:1em 2em 0 2em;">History Report: All Objects</h1>
+<div class="layout3col">
+  <div class="sidebar">
+    <h2>Objects</h2>
+    <ul id="object-list">
+      {{range .AllObjects}}
+      <li data-obj="{{.Name}}" class="">{{.Name}} <span style="font-size:0.85em;color:#aaa;">[{{.Type}}]</span></li>
+      {{end}}
+    </ul>
+  </div>
+  <div class="main-content">
+    <div class="history-col" id="history-panel"></div>
+    <div class="structure-col" id="structure-panel"></div>
+  </div>
+</div>
+<script>
+  var reports = {};
+  {{range $obj := .AllObjects}}
+  reports["{{$obj.Name}}"] = {
+    history: `
+	{{with $rep := index $.Reports $obj.Name}}
+		{{range $idx, $group := $rep.History}}
+		<div class="accordion{{if eq $idx 0}} active{{end}}">
+			<div class="accordion-header" style="display:flex;flex-direction:column;align-items:flex-start;">
+				<span class="accordion-title" style="font-weight:bold;color:#111;font-size:1.1em;">{{$group.MigrationName}}</span>
+				<span class="accordion-date" style="color:#888;font-size:0.95em;margin-top:0.2em;">{{$group.Date.Format "Mon, 02 Jan 2006 15:04:05 MST"}}</span>
+			</div>
+			<div class="accordion-content">
+				{{range $ch := $group.Actions}}
+				<div class="event">
+					<div class="op">{{$ch.Operation}}</div>
+					<div class="details">{{safeHTML $ch.Details}}</div>
+				</div>
+				{{end}}
+			</div>
+		</div>
+		{{end}}
+	{{end}}
+	`,
+    structure: `{{with $rep := index $.Reports $obj.Name}}{{.StructureHTML}}{{end}}`
+  };
+  {{end}}
+  function selectObject(objName) {
+    document.querySelectorAll('#object-list li').forEach(function(li) {
+      li.classList.remove('active');
+      if (li.getAttribute('data-obj') === objName) li.classList.add('active');
+    });
+    document.getElementById('history-panel').innerHTML = reports[objName].history;
+    document.getElementById('structure-panel').innerHTML = reports[objName].structure;
+    document.querySelectorAll('.accordion-header').forEach(function(header) {
+      header.addEventListener('click', function() {
+        var acc = header.parentElement;
+        acc.classList.toggle('active');
+      });
+    });
+  }
+  document.querySelectorAll('#object-list li').forEach(function(li) {
+    li.addEventListener('click', function() {
+      selectObject(li.getAttribute('data-obj'));
+    });
+  });
+  if (Object.keys(reports).length > 0) {
+    selectObject(Object.keys(reports)[0]);
+  }
+</script>
+</body>
+</html>
+
