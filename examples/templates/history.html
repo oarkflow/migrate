@@ -6,25 +6,46 @@
   <title>History Report - All Objects</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Minimalist scrollbar */
+    ::-webkit-scrollbar { width: 6px; background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 3px; }
+    /* Hide sidebar on small screens by default */
+    @media (max-width: 640px) {
+      #sidebar { position: absolute; z-index: 20; left: 0; top: 0; height: 100vh; width: 16rem; transform: translateX(-100%); transition: transform 0.2s; }
+      #sidebar.open { transform: translateX(0); }
+      #sidebar-backdrop { display: block; }
+    }
+    @media (min-width: 641px) {
+      #sidebar { transform: none !important; position: static; }
+      #sidebar-backdrop { display: none !important; }
+    }
+  </style>
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans">
+<body class="bg-gray-50 text-gray-800 font-sans text-sm">
 <!-- Header -->
 <header class="bg-white shadow-sm">
-  <div class="max-w-7xl mx-auto px-6 py-4">
-    <h1 class="text-2xl font-semibold">History Report: All Objects</h1>
+  <div class="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between">
+    <h1 class="text-lg font-semibold tracking-tight">History Report: All Objects</h1>
+    <button id="sidebar-toggle" class="sm:hidden p-2 rounded hover:bg-gray-200 focus:outline-none" aria-label="Toggle sidebar">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
   </div>
 </header>
 
 <div class="flex h-screen overflow-hidden">
   <!-- Sidebar -->
-  <aside class="w-64 bg-gray-800 text-gray-100 flex-shrink-0 overflow-y-auto">
-    <nav class="mt-6">
-      <h2 class="px-6 text-sm font-medium uppercase tracking-wider text-gray-400">Objects</h2>
-      <ul id="object-list" class="mt-2">
+  <div id="sidebar-backdrop" class="fixed inset-0 bg-black bg-opacity-20 z-10 hidden sm:hidden" tabindex="-1"></div>
+  <aside id="sidebar" class="w-64 bg-gray-900 text-gray-100 flex-shrink-0 overflow-y-auto transition-transform duration-200">
+    <nav class="mt-2">
+      <h2 class="px-4 text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Objects</h2>
+      <ul id="object-list" class="mt-1">
         {{range .AllObjects}}
-        <li data-obj="{{.Name}}" class="px-6 py-3 hover:bg-blue-600 hover:text-white cursor-pointer transition-colors">
+        <li data-obj="{{.Name}}" class="px-4 py-2 rounded hover:bg-blue-600 hover:text-white cursor-pointer transition-colors text-sm select-none">
           <span class="font-medium">{{.Name}}</span>
-          <span class="text-xs text-gray-400 ml-2">[{{.Type}}]</span>
+          <span class="text-xs text-gray-400 ml-1">[{{.Type}}]</span>
         </li>
         {{end}}
       </ul>
@@ -33,14 +54,14 @@
 
   <!-- Main Content -->
   <main class="flex-1 flex flex-col overflow-hidden">
-    <div class="flex-1 flex overflow-auto">
+    <div class="flex-1 flex flex-col sm:flex-row overflow-auto">
       <!-- History Column -->
-      <section id="history-panel" class="w-1/2 p-6 bg-gray-50 overflow-y-auto space-y-4">
+      <section id="history-panel" class="sm:w-1/2 p-3 bg-gray-50 overflow-y-auto space-y-2 border-r border-gray-200">
         <!-- Dynamically injected accordions -->
       </section>
 
       <!-- Structure Column -->
-      <section id="structure-panel" class="w-1/2 p-6 bg-white overflow-y-auto">
+      <section id="structure-panel" class="sm:w-1/2 p-3 bg-white overflow-y-auto">
         <!-- Dynamically injected structure HTML -->
       </section>
     </div>
@@ -54,42 +75,42 @@
     history: `
       {{with $rep := index $.Reports $obj.Name}}
         {{range $idx, $group := $rep.History}}
-        <div class="accordion border border-gray-200 rounded-lg shadow-sm overflow-hidden {{if eq $idx 0}}open{{end}}">
-          <button class="accordion-header flex flex-col w-full text-left px-4 py-3 bg-gray-100 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-expanded="false">
-            <span class="text-lg font-semibold text-gray-800">{{$group.MigrationName}}</span>
-            <span class="text-sm text-gray-500 mt-1">{{$group.Date.Format "Mon, 02 Jan 2006 15:04:05 MST"}}</span>
+        <div class="accordion border border-gray-200 rounded shadow-sm overflow-hidden {{if eq $idx 0}}open{{end}}">
+          <button class="accordion-header flex flex-col w-full text-left px-3 py-2 bg-gray-100 hover:bg-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400 transition" aria-expanded="false">
+            <span class="text-base font-semibold text-gray-800">{{$group.MigrationName}}</span>
+            <span class="text-xs text-gray-500 mt-0.5">{{$group.Date.Format "Mon, 02 Jan 2006 15:04:05 MST"}}</span>
           </button>
-          <div class="accordion-content px-4 py-3 hidden bg-white">
+          <div class="accordion-content px-3 py-2 hidden bg-white text-sm">
             {{range $ch := $group.Actions}}
-            <div class="event mb-4">
+            <div class="event mb-2">
               <div class="op text-blue-600 font-medium">{{$ch.Operation}}</div>
-              <div class="details mt-1 text-gray-700">
+              <div class="details mt-0.5 text-gray-700">
                 {{- if eq $ch.Operation "AddColumn" -}}
                   <b>{{ $ch.Column.Name }}</b> <code>{{ $ch.Column.Type }}</code>
-                  {{if $ch.Column.PrimaryKey}} <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs">PK</span>{{end}}
-                  {{if $ch.Column.AutoIncrement}} <span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs">AI</span>{{end}}
-                  {{if $ch.Column.Unique}} <span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs">Unique</span>{{end}}
-                  {{if $ch.Column.Index}} <span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs">Index</span>{{end}}
-                  {{if $ch.Column.Nullable}} <span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs">Nullable</span>{{end}}
-                  {{if $ch.Column.Default}} <span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">Default: {{$ch.Column.Default}}</span>{{end}}
-                  {{if $ch.Column.Check}} <span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">Check: {{$ch.Column.Check}}</span>{{end}}
+                  {{if $ch.Column.PrimaryKey}} <span class="bg-green-600 text-white px-1 py-0.5 rounded text-2xs">PK</span>{{end}}
+                  {{if $ch.Column.AutoIncrement}} <span class="bg-blue-600 text-white px-1 py-0.5 rounded text-2xs">AI</span>{{end}}
+                  {{if $ch.Column.Unique}} <span class="bg-purple-600 text-white px-1 py-0.5 rounded text-2xs">Unique</span>{{end}}
+                  {{if $ch.Column.Index}} <span class="bg-orange-500 text-white px-1 py-0.5 rounded text-2xs">Index</span>{{end}}
+                  {{if $ch.Column.Nullable}} <span class="bg-gray-500 text-white px-1 py-0.5 rounded text-2xs">Nullable</span>{{end}}
+                  {{if $ch.Column.Default}} <span class="bg-yellow-400 text-gray-900 px-1 py-0.5 rounded text-2xs">Default: {{$ch.Column.Default}}</span>{{end}}
+                  {{if $ch.Column.Check}} <span class="bg-cyan-600 text-white px-1 py-0.5 rounded text-2xs">Check: {{$ch.Column.Check}}</span>{{end}}
                 {{- else if eq $ch.Operation "DropColumn" -}}
                   Dropped column: <b>{{ $ch.DropColumn.Name }}</b>
                 {{- else if eq $ch.Operation "RenameColumn" -}}
                   Renamed column: <b>{{ $ch.RenameColumn.From }}</b> to <b>{{ $ch.RenameColumn.To }}</b>
                 {{- else if eq $ch.Operation "CreateTable" -}}
                   <b>Table created:</b>
-                  <ul>
+                  <ul class="ml-2">
                   {{range $col := $ch.CreateTable.Columns}}
                     <li>
                       <b>{{ $col.Name }}</b> <code>{{ $col.Type }}</code>
-                      {{if $col.PrimaryKey}} <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs">PK</span>{{end}}
-                      {{if $col.AutoIncrement}} <span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs">AI</span>{{end}}
-                      {{if $col.Unique}} <span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs">Unique</span>{{end}}
-                      {{if $col.Index}} <span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs">Index</span>{{end}}
-                      {{if $col.Nullable}} <span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs">Nullable</span>{{end}}
-                      {{if $col.Default}} <span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">Default: {{$col.Default}}</span>{{end}}
-                      {{if $col.Check}} <span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">Check: {{$col.Check}}</span>{{end}}
+                      {{if $col.PrimaryKey}} <span class="bg-green-600 text-white px-1 py-0.5 rounded text-2xs">PK</span>{{end}}
+                      {{if $col.AutoIncrement}} <span class="bg-blue-600 text-white px-1 py-0.5 rounded text-2xs">AI</span>{{end}}
+                      {{if $col.Unique}} <span class="bg-purple-600 text-white px-1 py-0.5 rounded text-2xs">Unique</span>{{end}}
+                      {{if $col.Index}} <span class="bg-orange-500 text-white px-1 py-0.5 rounded text-2xs">Index</span>{{end}}
+                      {{if $col.Nullable}} <span class="bg-gray-500 text-white px-1 py-0.5 rounded text-2xs">Nullable</span>{{end}}
+                      {{if $col.Default}} <span class="bg-yellow-400 text-gray-900 px-1 py-0.5 rounded text-2xs">{{$col.Default}}</span>{{end}}
+                      {{if $col.Check}} <span class="bg-cyan-600 text-white px-1 py-0.5 rounded text-2xs">{{$col.Check}}</span>{{end}}
                     </li>
                   {{end}}
                   </ul>
@@ -100,28 +121,28 @@
                   Table dropped
                 {{- else if eq $ch.Operation "CreateView" -}}
                   <b>Name:</b> {{$ch.CreateView.Name}}<br>
-                  <b>Definition:</b><pre>{{$ch.CreateView.Definition}}</pre>
+                  <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$ch.CreateView.Definition}}</pre>
                 {{- else if eq $ch.Operation "DropView" -}}
                   View dropped
                 {{- else if eq $ch.Operation "RenameView" -}}
                   Renamed view: <b>{{$ch.RenameColumn.From}}</b> to <b>{{$ch.RenameColumn.To}}</b>
                 {{- else if eq $ch.Operation "CreateFunction" -}}
                   <b>Name:</b> {{$ch.CreateFunction.Name}}<br>
-                  <b>Definition:</b><pre>{{$ch.CreateFunction.Definition}}</pre>
+                  <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$ch.CreateFunction.Definition}}</pre>
                 {{- else if eq $ch.Operation "DropFunction" -}}
                   Function dropped
                 {{- else if eq $ch.Operation "RenameFunction" -}}
                   Renamed function
                 {{- else if eq $ch.Operation "CreateProcedure" -}}
                   <b>Name:</b> {{$ch.CreateProcedure.Name}}<br>
-                  <b>Definition:</b><pre>{{$ch.CreateProcedure.Definition}}</pre>
+                  <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$ch.CreateProcedure.Definition}}</pre>
                 {{- else if eq $ch.Operation "DropProcedure" -}}
                   Procedure dropped
                 {{- else if eq $ch.Operation "RenameProcedure" -}}
                   Renamed procedure
                 {{- else if eq $ch.Operation "CreateTrigger" -}}
                   <b>Name:</b> {{$ch.CreateTrigger.Name}}<br>
-                  <b>Definition:</b><pre>{{$ch.CreateTrigger.Definition}}</pre>
+                  <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$ch.CreateTrigger.Definition}}</pre>
                 {{- else if eq $ch.Operation "DropTrigger" -}}
                   Trigger dropped
                 {{- else if eq $ch.Operation "RenameTrigger" -}}
@@ -137,39 +158,44 @@
       `,
     structure: `
       {{with $rep := index $.Reports $obj.Name}}
-        <h2 class="mt-0 text-xl font-bold">Final Structure</h2>
-        <div class="mb-4">
+        <h2 class="mt-0 text-base font-bold">Final Structure</h2>
+        <div class="mb-2">
         {{if eq $rep.Type "table"}}
           {{if $rep.FinalTable}}
-            <table class="min-w-full border border-gray-300 mb-2 text-sm"><thead><tr>
-              <th class="border px-2 py-1 bg-gray-100">Column</th>
-              <th class="border px-2 py-1 bg-gray-100">Type</th>
-              <th class="border px-2 py-1 bg-gray-100">Flags</th>
-              <th class="border px-2 py-1 bg-gray-100">Default</th>
-              <th class="border px-2 py-1 bg-gray-100">Check</th>
-            </tr></thead><tbody>
-            {{range $col := $rep.FinalTable.Columns}}
-              <tr>
-                <td class="border px-2 py-1">{{$col.Name}}</td>
-                <td class="border px-2 py-1"><code>{{$col.Type}}</code></td>
-                <td class="border px-2 py-1">
-                  {{if $col.PrimaryKey}}<span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs mr-1">PK</span>{{end}}
-                  {{if $col.AutoIncrement}}<span class="bg-blue-600 text-white px-2 py-0.5 rounded text-xs mr-1">AI</span>{{end}}
-                  {{if $col.Unique}}<span class="bg-purple-600 text-white px-2 py-0.5 rounded text-xs mr-1">Unique</span>{{end}}
-                  {{if $col.Index}}<span class="bg-orange-500 text-white px-2 py-0.5 rounded text-xs mr-1">Index</span>{{end}}
-                  {{if $col.Nullable}}<span class="bg-gray-500 text-white px-2 py-0.5 rounded text-xs mr-1">Nullable</span>{{end}}
-                </td>
-                <td class="border px-2 py-1">
-                  {{if $col.Default}}<span class="bg-yellow-400 text-gray-900 px-2 py-0.5 rounded text-xs">{{$col.Default}}</span>{{end}}
-                </td>
-                <td class="border px-2 py-1">
-                  {{if $col.Check}}<span class="bg-cyan-600 text-white px-2 py-0.5 rounded text-xs">{{$col.Check}}</span>{{end}}
-                </td>
-              </tr>
-            {{end}}
-            </tbody></table>
+            <table class="min-w-full border border-gray-200 mb-2 text-xs">
+              <thead>
+                <tr>
+                  <th class="border px-2 py-1 bg-gray-100">Column</th>
+                  <th class="border px-2 py-1 bg-gray-100">Type</th>
+                  <th class="border px-2 py-1 bg-gray-100">Flags</th>
+                  <th class="border px-2 py-1 bg-gray-100">Default</th>
+                  <th class="border px-2 py-1 bg-gray-100">Check</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range $col := $rep.FinalTable.Columns}}
+                <tr>
+                  <td class="border px-2 py-1">{{$col.Name}}</td>
+                  <td class="border px-2 py-1"><code>{{$col.Type}}</code></td>
+                  <td class="border px-2 py-1">
+                    {{if $col.PrimaryKey}}<span class="bg-green-600 text-white px-1 py-0.5 rounded text-2xs mr-1">PK</span>{{end}}
+                    {{if $col.AutoIncrement}}<span class="bg-blue-600 text-white px-1 py-0.5 rounded text-2xs mr-1">AI</span>{{end}}
+                    {{if $col.Unique}}<span class="bg-purple-600 text-white px-1 py-0.5 rounded text-2xs mr-1">Unique</span>{{end}}
+                    {{if $col.Index}}<span class="bg-orange-500 text-white px-1 py-0.5 rounded text-2xs mr-1">Index</span>{{end}}
+                    {{if $col.Nullable}}<span class="bg-gray-500 text-white px-1 py-0.5 rounded text-2xs mr-1">Nullable</span>{{end}}
+                  </td>
+                  <td class="border px-2 py-1">
+                    {{if $col.Default}}<span class="bg-yellow-400 text-gray-900 px-1 py-0.5 rounded text-2xs">{{$col.Default}}</span>{{end}}
+                  </td>
+                  <td class="border px-2 py-1">
+                    {{if $col.Check}}<span class="bg-cyan-600 text-white px-1 py-0.5 rounded text-2xs">{{$col.Check}}</span>{{end}}
+                  </td>
+                </tr>
+                {{end}}
+              </tbody>
+            </table>
             {{if $rep.FinalTable.PrimaryKey}}
-              <div class="mt-4"><b>Primary Key:</b> <span class="bg-green-600 text-white px-2 py-0.5 rounded text-xs ml-2">{{join $rep.FinalTable.PrimaryKey ", "}}</span></div>
+              <div class="mt-2"><b>Primary Key:</b> <span class="bg-green-600 text-white px-1 py-0.5 rounded text-2xs ml-1">{{join $rep.FinalTable.PrimaryKey ", "}}</span></div>
             {{end}}
           {{else}}
             <b>Object does not exist (dropped).</b>
@@ -177,28 +203,28 @@
         {{else if eq $rep.Type "view"}}
           {{if $rep.FinalView}}
             <b>Name:</b> {{$rep.FinalView.Name}}<br>
-            <b>Definition:</b><pre>{{$rep.FinalView.Definition}}</pre>
+            <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$rep.FinalView.Definition}}</pre>
           {{else}}
             <b>Object does not exist (dropped).</b>
           {{end}}
         {{else if eq $rep.Type "function"}}
           {{if $rep.FinalFunction}}
             <b>Name:</b> {{$rep.FinalFunction.Name}}<br>
-            <b>Definition:</b><pre>{{$rep.FinalFunction.Definition}}</pre>
+            <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$rep.FinalFunction.Definition}}</pre>
           {{else}}
             <b>Object does not exist (dropped).</b>
           {{end}}
         {{else if eq $rep.Type "procedure"}}
           {{if $rep.FinalProcedure}}
             <b>Name:</b> {{$rep.FinalProcedure.Name}}<br>
-            <b>Definition:</b><pre>{{$rep.FinalProcedure.Definition}}</pre>
+            <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$rep.FinalProcedure.Definition}}</pre>
           {{else}}
             <b>Object does not exist (dropped).</b>
           {{end}}
         {{else if eq $rep.Type "trigger"}}
           {{if $rep.FinalTrigger}}
             <b>Name:</b> {{$rep.FinalTrigger.Name}}<br>
-            <b>Definition:</b><pre>{{$rep.FinalTrigger.Definition}}</pre>
+            <b>Definition:</b><pre class="bg-gray-100 rounded p-2 text-xs mt-1">{{$rep.FinalTrigger.Definition}}</pre>
           {{else}}
             <b>Object does not exist (dropped).</b>
           {{end}}
@@ -210,15 +236,24 @@
   {{end}}
 
   function initAccordions(container) {
+    // Only one open at a time
     container.querySelectorAll('.accordion-header').forEach(header => {
       header.addEventListener('click', () => {
+        container.querySelectorAll('.accordion-content').forEach(c => c.classList.add('hidden'));
+        container.querySelectorAll('.accordion').forEach(a => a.classList.remove('open'));
         const panel = header.nextElementSibling;
-        const isOpen = !panel.classList.contains('hidden');
-        // Toggle
         panel.classList.toggle('hidden');
         header.parentElement.classList.toggle('open');
       });
     });
+    // Open first by default
+    const first = container.querySelector('.accordion');
+    if (first && !first.querySelector('.accordion-content').classList.contains('hidden')) {
+      // already open
+    } else if (first) {
+      first.querySelector('.accordion-content').classList.remove('hidden');
+      first.classList.add('open');
+    }
   }
 
   function selectObject(objName) {
@@ -232,10 +267,26 @@
     historyEl.innerHTML = reports[objName].history;
     structureEl.innerHTML = reports[objName].structure;
     initAccordions(historyEl);
+
+    // On mobile, close sidebar after selection
+    if (window.innerWidth < 641) {
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sidebar-backdrop').classList.add('hidden');
+    }
   }
 
   document.querySelectorAll('#object-list li').forEach(li => {
     li.addEventListener('click', () => selectObject(li.getAttribute('data-obj')));
+  });
+
+  // Sidebar toggle for mobile
+  document.getElementById('sidebar-toggle').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-backdrop').classList.toggle('hidden');
+  });
+  document.getElementById('sidebar-backdrop').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.remove('open');
+    this.classList.add('hidden');
   });
 
   // Auto-select first object
