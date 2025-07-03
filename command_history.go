@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,6 +36,12 @@ func (c *HistoryCommand) Extend() contracts.Extend {
 				Aliases: []string{"o"},
 				Usage:   "Name of the object (table/view/function/procedure/trigger) to analyze",
 				Value:   "",
+			},
+			{
+				Name:    "serve",
+				Aliases: []string{"s"},
+				Usage:   "Serve the HTML report at a local HTTP endpoint instead of writing to a file",
+				Value:   "false",
 			},
 		},
 	}
@@ -70,6 +77,8 @@ type objectInfo struct {
 
 func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	objectName := ctx.Option("object")
+	serveFlag := ctx.Option("serve") == "true"
+
 	files, err := os.ReadDir(c.Driver.MigrationDir())
 	if err != nil {
 		return fmt.Errorf("failed to read migration directory: %w", err)
@@ -131,6 +140,17 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	if err != nil {
 		return err
 	}
+
+	if serveFlag {
+		// Serve the HTML report at http://localhost:8080/history
+		fmt.Println("Serving history report at http://localhost:8080/history (Press Ctrl+C to stop)")
+		http.HandleFunc("/history", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(report))
+		})
+		return http.ListenAndServe(":8080", nil)
+	}
+
 	reportPath := filepath.Join(".", fmt.Sprintf("history_%s_%d.html", func() string {
 		if objectName == "" {
 			return "all"
