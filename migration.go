@@ -398,7 +398,7 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 	if len(at.DropColumn) > 0 || len(at.RenameColumn) > 0 {
 		for _, dropCol := range at.DropColumn {
 			found := false
-			newCols := []AddColumn{}
+			var newCols []AddColumn
 			for _, col := range newSchema.Columns {
 				if col.Name == dropCol.Name {
 					found = true
@@ -410,7 +410,7 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 				return nil, fmt.Errorf("column %s not found in table %s for dropping", dropCol.Name, at.Name)
 			}
 			newSchema.Columns = newCols
-			newPK := []string{}
+			var newPK []string
 			for _, pk := range newSchema.PrimaryKey {
 				if pk != dropCol.Name {
 					newPK = append(newPK, pk)

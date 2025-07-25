@@ -60,7 +60,6 @@ type MigrationChange struct {
 	CreateFunction  *CreateFunction
 	CreateProcedure *CreateProcedure
 	CreateTrigger   *CreateTrigger
-	// ...add more as needed for richer template rendering...
 }
 
 // Add MigrationGroup type definition
