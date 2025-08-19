@@ -10,7 +10,6 @@ import (
 
 	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli"
-	"github.com/oarkflow/cli/console"
 	"github.com/oarkflow/cli/contracts"
 	"github.com/oarkflow/log"
 	"github.com/oarkflow/squealx"
@@ -57,6 +56,7 @@ type Manager struct {
 	dbDriver      IDatabaseDriver
 	historyDriver HistoryDriver
 	Verbose       bool
+	command       []contracts.Command
 }
 
 type ManagerOption func(*Manager)
@@ -64,6 +64,12 @@ type ManagerOption func(*Manager)
 func WithMigrationDir(dir string) ManagerOption {
 	return func(m *Manager) {
 		m.migrationDir = dir
+	}
+}
+
+func WithCommands(commands ...contracts.Command) ManagerOption {
+	return func(m *Manager) {
+		m.command = append(m.command, commands...)
 	}
 }
 
@@ -143,8 +149,7 @@ func NewManager(opts ...ManagerOption) *Manager {
 	if err := os.MkdirAll(m.seedDir, fs.ModePerm); err != nil {
 		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
 	}
-	client.Register([]contracts.Command{
-		console.NewListCommand(client),
+	cmds := append([]contracts.Command{
 		&MakeMigrationCommand{Driver: m},
 		&MigrateCommand{Driver: m},
 		&RollbackCommand{Driver: m},
@@ -158,7 +163,8 @@ func NewManager(opts ...ManagerOption) *Manager {
 		&ConfigValidateCommand{Driver: m},
 		&ConfigShowCommand{Driver: m},
 		&StatusCommand{Driver: m},
-	})
+	}, m.command...)
+	client.Register(cmds)
 	return m
 }
 
