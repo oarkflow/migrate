@@ -199,16 +199,17 @@ func (d *Manager) Run(clients ...contracts.Cli) {
 	var client contracts.Cli
 	if len(clients) > 0 {
 		client = clients[0]
+	} else if d.client != nil {
+		client = d.client
 	} else {
 		cli.SetName(Name)
 		cli.SetVersion(Version)
 		app := cli.New()
 		client = app.Instance.Client()
 	}
-	d.client = client
 	cmds := append(GetCommands(d), d.command...)
 	client.Register(cmds)
-	d.client.Run(os.Args, true)
+	client.Run(os.Args, true)
 }
 
 func (d *Manager) SetDialect(dialect string) {
