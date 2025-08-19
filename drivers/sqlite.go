@@ -12,6 +12,10 @@ type SQLiteDriver struct {
 	db *squealx.DB
 }
 
+func NewSQLiteDriverFromDB(db *squealx.DB) *SQLiteDriver {
+	return &SQLiteDriver{db: db}
+}
+
 func NewSQLiteDriver(dbPath string) (*SQLiteDriver, error) {
 	db, err := sqlite.Open(dbPath, "sqlite3")
 	if err != nil {

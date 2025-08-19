@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/oarkflow/migrate/drivers"
+	"github.com/oarkflow/squealx"
 )
 
 const (
@@ -692,6 +693,18 @@ func NewDriver(driver string, dsn string) (IDatabaseDriver, error) {
 		return drivers.NewPostgresDriver(dsn)
 	case "sqlite":
 		return drivers.NewSQLiteDriver(dsn)
+	}
+	return nil, fmt.Errorf("unsupported driver: %s", driver)
+}
+
+func NewFromDB(driver string, db *squealx.DB) (IDatabaseDriver, error) {
+	switch driver {
+	case "mysql":
+		return drivers.NewMySQLDriverFromDB(db), nil
+	case "postgres":
+		return drivers.NewPostgresDriverFromDB(db), nil
+	case "sqlite":
+		return drivers.NewSQLiteDriverFromDB(db), nil
 	}
 	return nil, fmt.Errorf("unsupported driver: %s", driver)
 }

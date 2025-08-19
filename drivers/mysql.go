@@ -12,6 +12,10 @@ type MySQLDriver struct {
 	db *squealx.DB
 }
 
+func NewMySQLDriverFromDB(db *squealx.DB) *MySQLDriver {
+	return &MySQLDriver{db: db}
+}
+
 func NewMySQLDriver(dsn string) (*MySQLDriver, error) {
 	db, err := mysql.Open(dsn, "mysql")
 	if err != nil {

@@ -12,6 +12,10 @@ type PostgresDriver struct {
 	db *squealx.DB
 }
 
+func NewPostgresDriverFromDB(db *squealx.DB) *PostgresDriver {
+	return &PostgresDriver{db: db}
+}
+
 func NewPostgresDriver(dsn string) (*PostgresDriver, error) {
 	db, err := postgres.Open(dsn, "postgres")
 	if err != nil {
