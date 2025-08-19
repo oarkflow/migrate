@@ -1,82 +1,389 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>History Report - All Objects</title>
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    /* Minimalist scrollbar */
-    ::-webkit-scrollbar { width: 6px; background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 3px; }
-    /* Hide sidebar on small screens by default */
-    @media (max-width: 640px) {
-      #sidebar { position: absolute; z-index: 20; left: 0; top: 0; height: 100vh; width: 16rem; transform: translateX(-100%); transition: transform 0.2s; }
-      #sidebar.open { transform: translateX(0); }
-      #sidebar-backdrop { display: block; }
-    }
-    @media (min-width: 641px) {
-      #sidebar { transform: none !important; position: static; }
-      #sidebar-backdrop { display: none !important; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migration History Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        /* Minimalist scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #e5e7eb;
+            border-radius: 3px;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: relative;
+            cursor: pointer;
+        }
+
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: max-content;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 4px;
+            padding: 4px 8px;
+            position: absolute;
+            z-index: 30;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-size: 0.75rem;
+        }
+
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* Animation for tab/content */
+        .fade-enter {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        .fade-enter-active {
+            opacity: 1;
+            transform: translateY(0);
+            transition: opacity 0.3s, transform 0.3s;
+        }
+
+        /* Hide sidebar on small screens by default */
+        @media (max-width: 640px) {
+            #sidebar {
+                position: absolute;
+                z-index: 20;
+                left: 0;
+                top: 0;
+                height: 100vh;
+                width: 16rem;
+                transform: translateX(-100%);
+                transition: transform 0.2s;
+            }
+
+            #sidebar.open {
+                transform: translateX(0);
+            }
+
+            #sidebar-backdrop {
+                display: block;
+            }
+        }
+
+        @media (min-width: 641px) {
+            #sidebar {
+                transform: none !important;
+                position: static;
+            }
+
+            #sidebar-backdrop {
+                display: none !important;
+            }
+        }
+
+        /* Gradient header */
+        .hero-gradient {
+            background: linear-gradient(90deg, #2563eb 0%, #38bdf8 100%);
+        }
+
+        /* Floating feedback button */
+        #feedback-btn {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 50;
+            background: linear-gradient(90deg, #2563eb 0%, #38bdf8 100%);
+            color: white;
+            border-radius: 9999px;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+            padding: 0.75rem 1.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: box-shadow 0.2s;
+        }
+
+        #feedback-btn:hover {
+            box-shadow: 0 4px 16px rgba(37, 99, 235, 0.25);
+            background: linear-gradient(90deg, #38bdf8 0%, #2563eb 100%);
+        }
+
+        /* Back to top button */
+        #back-to-top {
+            position: fixed;
+            bottom: 80px;
+            right: 32px;
+            z-index: 40;
+            background: #fff;
+            color: #2563eb;
+            border-radius: 9999px;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+            padding: 0.5rem 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid #2563eb;
+            display: none;
+        }
+
+        #back-to-top.show {
+            display: block;
+        }
+    </style>
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans text-sm">
 
-<div class="flex h-screen overflow-hidden">
-  <!-- Sidebar -->
-  <div id="sidebar-backdrop" class="fixed inset-0 bg-black bg-opacity-20 z-10 hidden sm:hidden" tabindex="-1"></div>
-  <aside id="sidebar" class="w-64 bg-gray-900 text-gray-100 flex-shrink-0 overflow-y-auto transition-transform duration-200">
-    <nav class="mt-2">
-      <h2 class="px-4 text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Objects</h2>
-      <ul id="object-list" class="mt-1">
-        {{range .AllObjects}}
-        <li data-obj="{{.Name}}" class="px-4 py-2 rounded hover:bg-blue-600 hover:text-white cursor-pointer transition-colors text-sm select-none">
-          <span class="font-medium">{{.Name}}</span>
-          <span class="text-xs text-gray-400 ml-1">[{{.Type}}]</span>
-        </li>
-        {{end}}
-      </ul>
-    </nav>
-  </aside>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 font-sans text-sm">
 
-  <!-- Main Content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
-    <div class="flex-1 flex flex-col sm:flex-row overflow-auto">
-      <!-- Structure/History Tabs Column -->
-      <section class="sm:w-full p-3 bg-white overflow-y-auto">
-        <!-- Tabs Header -->
-        <div class="border-b border-gray-200 mb-4 flex items-center justify-between">
-          <div class="flex space-x-2" id="tab-buttons">
-            <button id="tab-structure-btn" class="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-t border border-b-0 border-gray-200 focus:outline-none" data-tab="structure" type="button">
-              Final Structure
-            </button>
-            <button id="tab-history-btn" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white rounded-t border border-b-0 border-gray-200 focus:outline-none" data-tab="history" type="button">
-              History
-            </button>
-          </div>
-          <button id="sidebar-toggle" class="sm:hidden p-2 rounded hover:bg-gray-200 focus:outline-none" aria-label="Toggle sidebar">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
-            </svg>
-          </button>
+    <!-- Hero Section -->
+    <section
+        class="hero-gradient py-8 px-6 flex items-center justify-between text-white shadow-lg mb-2 animate-fade-in">
+        <div class="flex items-center space-x-4">
+            <img src="/assets/history.png" alt="History" class="w-16 h-16 drop-shadow-lg">
+            <div>
+                <h1 class="text-3xl font-bold tracking-tight mb-1">Migration History Dashboard</h1>
+                <p class="text-base opacity-90">Track, explore, and understand your database changes visually.<br>
+                    <span class="text-xs opacity-80">Your database story, beautifully visualized.</span>
+                </p>
+            </div>
         </div>
-        <!-- Tabs Content -->
-        <div>
-          <div id="structure-panel" class="tab-panel"></div>
-          <div id="history-panel" class="tab-panel hidden"></div>
+        <div class="hidden md:flex flex-col items-end space-y-2">
+            <span class="bg-white/10 px-3 py-1 rounded-full text-sm font-semibold shadow">Powered by <a
+                    href="https://github.com/oarkflow/migrate" class="underline">Migrate</a></span>
         </div>
-      </section>
+    </section>
+
+    <!-- Quick Stats -->
+    <section
+        class="w-full py-2 px-6 flex items-center justify-between border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 animate-fade-in">
+        <div class="flex space-x-6">
+            <div
+                class="flex items-center space-x-2 bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-sm animate-pop-in">
+                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" />
+                </svg>
+                <span class="font-semibold">Objects:</span>
+                <span class="text-blue-700 dark:text-blue-300 text-lg font-bold">{{len .AllObjects}}</span>
+            </div>
+            <div
+                class="flex items-center space-x-2 bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-sm animate-pop-in">
+                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18" />
+                </svg>
+                <span class="font-semibold">Migrations:</span>
+                <span class="text-green-700 dark:text-green-300 text-lg font-bold">{{.TotalMigrations}}</span>
+            </div>
+            <div
+                class="flex items-center space-x-2 bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-sm animate-pop-in">
+                <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24">
+                    <path d="M12 8v4l3 2" />
+                    <circle cx="12" cy="12" r="10" />
+                </svg>
+                <span class="font-semibold">Last Updated:</span>
+                <span class="text-purple-700 dark:text-purple-300 text-lg font-bold">{{.LastUpdated}}</span>
+            </div>
+        </div>
+        <div class="hidden sm:flex items-center space-x-2">
+            <span class="text-xs text-gray-500 dark:text-gray-400">Tip: Use the sidebar to filter objects.</span>
+        </div>
+    </section>
+
+    <!-- What's New Section -->
+    <section
+        class="w-full px-6 py-4 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 animate-fade-in">
+        <h2 class="text-lg font-bold mb-2 flex items-center">
+            <svg class="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" stroke-width="2"
+                viewBox="0 0 24 24">
+                <path d="M19 9l-7 7-7-7" />
+            </svg>What's New?
+        </h2>
+        <div class="flex flex-wrap gap-4">
+            {{range $obj := .AllObjects}}
+            {{with $rep := index $.Reports $obj.Name}}
+            {{if $rep.History}}
+            {{ $latest := index $rep.History (sub (len $rep.History) 1) }}
+            <div
+                class="bg-blue-50 dark:bg-gray-800 rounded-lg px-4 py-2 shadow-sm flex flex-col min-w-[220px] animate-pop-in">
+                <div class="flex items-center space-x-2 mb-1">
+                    <span class="font-semibold text-blue-700 dark:text-blue-300">{{$rep.Name}}</span>
+                    <span class="text-xs text-gray-400">[{{$rep.Type}}]</span>
+                </div>
+                <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">{{$latest.Date.Format "2006-01-02 15:04:05"}}
+                </div>
+                <div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+                    {{range $latest.Actions}}
+                    <span
+                        class="inline-block bg-blue-600 text-white px-2 py-0.5 rounded-full mr-1">{{$ch.Operation}}</span>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+            {{end}}
+            {{end}}
+        </div>
+    </section>
+
+    <div class="flex h-[calc(100vh-110px)] overflow-hidden">
+        <!-- Sidebar -->
+        <div id="sidebar-backdrop" class="fixed inset-0 bg-black bg-opacity-20 z-10 hidden sm:hidden" tabindex="-1">
+        </div>
+        <aside id="sidebar"
+            class="w-64 bg-gradient-to-b from-blue-900 to-blue-700 dark:from-gray-950 dark:to-gray-900 text-gray-100 flex-shrink-0 overflow-y-auto transition-transform duration-200 shadow-lg border-r border-blue-800 dark:border-gray-900">
+            <nav class="mt-2">
+                <h2 class="px-4 text-xs font-semibold uppercase tracking-wider text-blue-200 mb-1">Objects</h2>
+                <div class="px-4 mb-2">
+                    <input id="object-search" type="text" placeholder="Search objects..."
+                        class="w-full px-2 py-1 rounded bg-blue-800 dark:bg-gray-900 text-gray-100 border border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm" />
+                </div>
+                <ul id="object-list" class="mt-1">
+                    {{range .AllObjects}}
+                    <li data-obj="{{.Name}}"
+                        class="px-4 py-2 rounded hover:bg-blue-600 hover:text-white cursor-pointer transition-colors text-sm select-none flex items-center space-x-2">
+                        <span class="font-medium">{{.Name}}</span>
+                        <span class="text-xs text-blue-200 ml-1">[{{.Type}}]</span>
+                        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2"
+                            viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" />
+                        </svg>
+                    </li>
+                    {{end}}
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <div class="flex-1 flex flex-col sm:flex-row overflow-auto">
+                <!-- Structure/History Tabs Column -->
+                <section class="sm:w-full p-3 bg-white overflow-y-auto">
+                    <!-- Tabs Header -->
+                    <div class="border-b border-gray-200 dark:border-gray-700 mb-4 flex items-center justify-between">
+                        <div class="flex space-x-2" id="tab-buttons">
+                            <button id="tab-structure-btn"
+                                class="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-t border border-b-0 border-gray-200 focus:outline-none transition-colors duration-150 hover:bg-blue-100"
+                                data-tab="structure" type="button">
+                                <svg class="w-4 h-4 inline-block mr-1 text-blue-600" fill="none" stroke="currentColor"
+                                    stroke-width="2" viewBox="0 0 24 24">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                </svg>
+                                Final Structure
+                            </button>
+                            <button id="tab-history-btn"
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white rounded-t border border-b-0 border-gray-200 focus:outline-none transition-colors duration-150 hover:bg-blue-100"
+                                data-tab="history" type="button">
+                                <svg class="w-4 h-4 inline-block mr-1 text-green-600" fill="none" stroke="currentColor"
+                                    stroke-width="2" viewBox="0 0 24 24">
+                                    <path d="M19 9l-7 7-7-7" />
+                                </svg>
+                                History
+                            </button>
+                        </div>
+                        <button id="sidebar-toggle" class="sm:hidden p-2 rounded hover:bg-gray-200 focus:outline-none"
+                            aria-label="Toggle sidebar">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Tabs Content -->
+                    <div>
+                        <div id="structure-panel" class="tab-panel"></div>
+                        <div id="history-panel" class="tab-panel hidden"></div>
+                    </div>
+                    <!-- Move Tips & Usage here, below tabs -->
+                    <section
+                        class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 border-t border-gray-200 dark:border-gray-800 mt-8 animate-fade-in rounded">
+                        <h2 class="text-md font-bold mb-1 flex items-center">
+                            <svg class="w-4 h-4 text-green-600 mr-2" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path d="M5 13l4 4L19 7" />
+                            </svg>Tips & Usage
+                        </h2>
+                        <ul class="list-disc ml-6 text-sm text-gray-700 dark:text-gray-300">
+                            <li>Click objects in the sidebar to view their structure and history.</li>
+                            <li>Use the search box to quickly find objects.</li>
+                            <li>Switch between <b>Final Structure</b> and <b>History</b> tabs for details.</li>
+                            <li>Copy migration details or SQL definitions using the copy button.</li>
+                            <li>Toggle dark/light mode for your comfort.</li>
+                            <li>Use the feedback button to share your thoughts!</li>
+                        </ul>
+                    </section>
+                </section>
+            </div>
+        </main>
     </div>
-  </main>
-</div>
 
-<script>
-  var reports = {};
-  {{range $obj := .AllObjects}}
-  reports["{{$obj.Name}}"] = {
-    history: `
+    <!-- Tips & Usage Section -->
+    <section
+        class="w-full px-6 py-3 bg-gradient-to-r from-blue-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 border-t border-gray-200 dark:border-gray-800 mt-8 animate-fade-in">
+        <h2 class="text-md font-bold mb-1 flex items-center">
+            <svg class="w-4 h-4 text-green-600 mr-2" fill="none" stroke="currentColor" stroke-width="2"
+                viewBox="0 0 24 24">
+                <path d="M5 13l4 4L19 7" />
+            </svg>Tips & Usage
+        </h2>
+        <ul class="list-disc ml-6 text-sm text-gray-700 dark:text-gray-300">
+            <li>Click objects in the sidebar to view their structure and history.</li>
+            <li>Use the search box to quickly find objects.</li>
+            <li>Switch between <b>Final Structure</b> and <b>History</b> tabs for details.</li>
+            <li>Copy migration details or SQL definitions using the copy button.</li>
+            <li>Toggle dark/light mode for your comfort.</li>
+            <li>Use the feedback button to share your thoughts!</li>
+        </ul>
+    </section>
+
+    <!-- Floating Feedback Button -->
+    <button id="feedback-btn" onclick="window.open('https://github.com/oarkflow/migrate/issues', '_blank')">
+        <svg class="w-5 h-5 inline-block mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        Feedback
+    </button>
+    <!-- Back to Top Button -->
+    <button id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">
+        ↑ Top
+    </button>
+
+    <script>
+        // Dark mode toggle
+        document.getElementById('dark-toggle').addEventListener('click', function () {
+            document.documentElement.classList.toggle('dark');
+            localStorage.setItem('darkMode', document.documentElement.classList.contains('dark'));
+        });
+        // Persist dark mode
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.documentElement.classList.add('dark');
+        }
+        var reports = {};
+        { {range $obj:= .AllObjects } }
+        reports["{{$obj.Name}}"] = {
+            history: `
       {{with $rep := index $.Reports $obj.Name}}
         {{range $idx, $group := $rep.History}}
         <div class="accordion border border-gray-200 rounded shadow-sm overflow-hidden {{if eq $idx 0}}open{{end}} mb-2">
@@ -155,12 +462,17 @@
               </div>
             </div>
             {{end}}
+            <!-- Show structure after this migration group -->
+            <div class="mt-4 pt-2 border-t">
+              <b>Structure after migration:</b>
+              {{ $group.StructureAfter | safeHTML }}
+            </div>
           </div>
         </div>
         {{end}}
       {{end}}
       `,
-    structure: `
+            structure: `
       {{with $rep := index $.Reports $obj.Name}}
         <div class="mb-2">
         {{if eq $rep.Type "table"}}
@@ -235,98 +547,193 @@
         </div>
       {{end}}
     `
-  };
-  {{end}}
+        };
+        { { end } }
 
-  function initAccordions(container) {
-    // Only one open at a time
-    container.querySelectorAll('.accordion-header').forEach(header => {
-      header.addEventListener('click', () => {
-        container.querySelectorAll('.accordion-content').forEach(c => c.classList.add('hidden'));
-        container.querySelectorAll('.accordion').forEach(a => {
-          a.classList.remove('open');
-          a.querySelector('.accordion-header').classList.remove('!bg-blue-50');
-        });
-        const panel = header.nextElementSibling;
-        panel.classList.toggle('hidden');
-        header.parentElement.classList.toggle('open');
-        if (header.parentElement.classList.contains('open')) {
-          header.classList.add('!bg-blue-50');
+        function initAccordions(container) {
+            // Only one open at a time
+            container.querySelectorAll('.accordion-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    container.querySelectorAll('.accordion-content').forEach(c => c.classList.add('hidden'));
+                    container.querySelectorAll('.accordion').forEach(a => {
+                        a.classList.remove('open');
+                        a.querySelector('.accordion-header').classList.remove('!bg-blue-50');
+                    });
+                    const panel = header.nextElementSibling;
+                    panel.classList.toggle('hidden');
+                    header.parentElement.classList.toggle('open');
+                    if (header.parentElement.classList.contains('open')) {
+                        header.classList.add('!bg-blue-50');
+                    }
+                    // Animation
+                    panel.classList.add('fade-enter');
+                    setTimeout(() => {
+                        panel.classList.remove('fade-enter');
+                        panel.classList.add('fade-enter-active');
+                        setTimeout(() => panel.classList.remove('fade-enter-active'), 300);
+                    }, 10);
+                });
+            });
+            // Open first by default
+            const first = container.querySelector('.accordion');
+            if (first && !first.querySelector('.accordion-content').classList.contains('hidden')) {
+                // already open
+            } else if (first) {
+                first.querySelector('.accordion-content').classList.remove('hidden');
+                first.classList.add('open');
+                first.querySelector('.accordion-header').classList.add('!bg-blue-50');
+            }
         }
-      });
-    });
-    // Open first by default
-    const first = container.querySelector('.accordion');
-    if (first && !first.querySelector('.accordion-content').classList.contains('hidden')) {
-      // already open
-    } else if (first) {
-      first.querySelector('.accordion-content').classList.remove('hidden');
-      first.classList.add('open');
-      first.querySelector('.accordion-header').classList.add('!bg-blue-50');
-    }
-  }
 
-  function showTab(tab) {
-    document.getElementById('tab-structure-btn').classList.toggle('bg-blue-50', tab === 'structure');
-    document.getElementById('tab-structure-btn').classList.toggle('text-blue-700', tab === 'structure');
-    document.getElementById('tab-structure-btn').classList.toggle('bg-white', tab !== 'structure');
-    document.getElementById('tab-structure-btn').classList.toggle('text-gray-700', tab !== 'structure');
+        function showTab(tab) {
+            document.getElementById('tab-structure-btn').classList.toggle('bg-blue-50', tab === 'structure');
+            document.getElementById('tab-structure-btn').classList.toggle('text-blue-700', tab === 'structure');
+            document.getElementById('tab-structure-btn').classList.toggle('bg-white', tab !== 'structure');
+            document.getElementById('tab-structure-btn').classList.toggle('text-gray-700', tab !== 'structure');
 
-    document.getElementById('tab-history-btn').classList.toggle('bg-blue-50', tab === 'history');
-    document.getElementById('tab-history-btn').classList.toggle('text-blue-700', tab === 'history');
-    document.getElementById('tab-history-btn').classList.toggle('bg-white', tab !== 'history');
-    document.getElementById('tab-history-btn').classList.toggle('text-gray-700', tab !== 'history');
+            document.getElementById('tab-history-btn').classList.toggle('bg-blue-50', tab === 'history');
+            document.getElementById('tab-history-btn').classList.toggle('text-blue-700', tab === 'history');
+            document.getElementById('tab-history-btn').classList.toggle('bg-white', tab !== 'history');
+            document.getElementById('tab-history-btn').classList.toggle('text-gray-700', tab !== 'history');
 
-    document.getElementById('structure-panel').classList.toggle('hidden', tab !== 'structure');
-    document.getElementById('history-panel').classList.toggle('hidden', tab !== 'history');
-  }
+            document.getElementById('structure-panel').classList.toggle('hidden', tab !== 'structure');
+            document.getElementById('history-panel').classList.toggle('hidden', tab !== 'history');
+        }
 
-  document.getElementById('tab-structure-btn').addEventListener('click', function() {
-    showTab('structure');
-  });
-  document.getElementById('tab-history-btn').addEventListener('click', function() {
-    showTab('history');
-  });
+        document.getElementById('tab-structure-btn').addEventListener('click', function () {
+            showTab('structure');
+        });
+        document.getElementById('tab-history-btn').addEventListener('click', function () {
+            showTab('history');
+        });
 
-  function selectObject(objName) {
-    document.querySelectorAll('#object-list li').forEach(li => {
-      li.classList.remove('bg-blue-600', 'text-white');
-      if (li.getAttribute('data-obj') === objName) li.classList.add('bg-blue-600', 'text-white');
-    });
+        function selectObject(objName) {
+            document.querySelectorAll('#object-list li').forEach(li => {
+                li.classList.remove('bg-blue-600', 'text-white');
+                if (li.getAttribute('data-obj') === objName) li.classList.add('bg-blue-600', 'text-white');
+            });
 
-    const historyEl = document.getElementById('history-panel');
-    const structureEl = document.getElementById('structure-panel');
-    historyEl.innerHTML = reports[objName].history;
-    structureEl.innerHTML = reports[objName].structure;
-    initAccordions(historyEl);
+            const historyEl = document.getElementById('history-panel');
+            const structureEl = document.getElementById('structure-panel');
+            historyEl.innerHTML = reports[objName].history;
+            structureEl.innerHTML = reports[objName].structure;
+            initAccordions(historyEl);
+            enhancePanels();
+            // Animation for tab content
+            [historyEl, structureEl].forEach(el => {
+                el.classList.add('fade-enter');
+                setTimeout(() => {
+                    el.classList.remove('fade-enter');
+                    el.classList.add('fade-enter-active');
+                    setTimeout(() => el.classList.remove('fade-enter-active'), 300);
+                }, 10);
+            });
 
-    // On mobile, close sidebar after selection
-    if (window.innerWidth < 641) {
-      document.getElementById('sidebar').classList.remove('open');
-      document.getElementById('sidebar-backdrop').classList.add('hidden');
-    }
-  }
+            // On mobile, close sidebar after selection
+            if (window.innerWidth < 641) {
+                document.getElementById('sidebar').classList.remove('open');
+                document.getElementById('sidebar-backdrop').classList.add('hidden');
+            }
+        }
 
-  document.querySelectorAll('#object-list li').forEach(li => {
-    li.addEventListener('click', () => selectObject(li.getAttribute('data-obj')));
-  });
+        // Object filter
+        document.getElementById('object-search').addEventListener('input', function () {
+            const val = this.value.toLowerCase();
+            document.querySelectorAll('#object-list li').forEach(li => {
+                const name = li.getAttribute('data-obj').toLowerCase();
+                li.style.display = name.includes(val) ? '' : 'none';
+            });
+        });
+        document.querySelectorAll('#object-list li').forEach(li => {
+            li.addEventListener('click', () => selectObject(li.getAttribute('data-obj')));
+        });
 
-  // Sidebar toggle for mobile
-  document.getElementById('sidebar-toggle').addEventListener('click', function() {
-    document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebar-backdrop').classList.toggle('hidden');
-  });
-  document.getElementById('sidebar-backdrop').addEventListener('click', function() {
-    document.getElementById('sidebar').classList.remove('open');
-    this.classList.add('hidden');
-  });
+        // Sidebar toggle for mobile
+        document.getElementById('sidebar-toggle').addEventListener('click', function () {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebar-backdrop').classList.toggle('hidden');
+        });
+        document.getElementById('sidebar-backdrop').addEventListener('click', function () {
+            document.getElementById('sidebar').classList.remove('open');
+            this.classList.add('hidden');
+        });
 
-  // Auto-select first object and default to "Final Structure" tab
-  document.addEventListener('DOMContentLoaded', () => {
-    const keys = Object.keys(reports);
-    if (keys.length) selectObject(keys[0]);
-    showTab('structure');
-  });
-</script>
+        // Auto-select first object and default to "Final Structure" tab
+        document.addEventListener('DOMContentLoaded', () => {
+            const keys = Object.keys(reports);
+            if (keys.length) selectObject(keys[0]);
+            showTab('structure');
+        });
+
+        // Show/hide back to top button
+        window.addEventListener('scroll', function () {
+            document.getElementById('back-to-top').classList.toggle('show', window.scrollY > 300);
+        });
+
+        // Copy to clipboard for migration details and SQL
+        function addCopyButtons() {
+            document.querySelectorAll('pre').forEach(pre => {
+                if (pre.parentElement.querySelector('.copy-btn')) return;
+                const btn = document.createElement('button');
+                btn.textContent = 'Copy';
+                btn.className = 'copy-btn absolute top-2 right-2 bg-blue-600 text-white px-2 py-0.5 rounded text-xs shadow hover:bg-blue-700';
+                btn.style.position = 'absolute';
+                btn.style.top = '4px';
+                btn.style.right = '8px';
+                btn.onclick = function () {
+                    navigator.clipboard.writeText(pre.textContent);
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => btn.textContent = 'Copy', 1200);
+                };
+                pre.style.position = 'relative';
+                pre.parentElement.style.position = 'relative';
+                pre.parentElement.appendChild(btn);
+            });
+        }
+        // Show SQL toggle
+        function addShowSQLToggles() {
+            document.querySelectorAll('pre').forEach(pre => {
+                if (pre.parentElement.querySelector('.show-sql-btn')) return;
+                const btn = document.createElement('button');
+                btn.textContent = 'Show SQL';
+                btn.className = 'show-sql-btn absolute top-2 left-2 bg-gray-600 text-white px-2 py-0.5 rounded text-xs shadow hover:bg-gray-700';
+                btn.style.position = 'absolute';
+                btn.style.top = '4px';
+                btn.style.left = '8px';
+                btn.onclick = function () {
+                    pre.classList.toggle('max-h-32');
+                    pre.classList.toggle('overflow-y-auto');
+                    if (pre.classList.contains('max-h-32')) {
+                        btn.textContent = 'Expand';
+                        pre.style.maxHeight = '8rem';
+                    } else {
+                        btn.textContent = 'Collapse';
+                        pre.style.maxHeight = '';
+                    }
+                };
+                pre.style.position = 'relative';
+                pre.parentElement.style.position = 'relative';
+                pre.parentElement.appendChild(btn);
+            });
+        }
+        // Enhance after tab/object change
+        function enhancePanels() {
+            addCopyButtons();
+            addShowSQLToggles();
+        }
+    </script>
+    <!-- Footer -->
+    <footer
+        class="w-full bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 py-2 px-6 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+        <div>
+            &copy; 2025 Migration Dashboard. <a href="https://github.com/oarkflow/migrate"
+                class="underline hover:text-blue-600">GitHub</a>
+        </div>
+        <div>
+            <a href="#" class="underline hover:text-blue-600">Help</a> | <a href="#"
+                class="underline hover:text-blue-600">Feedback</a>
+        </div>
+    </footer>
 </body>
+
 </html>
