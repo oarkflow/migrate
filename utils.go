@@ -22,7 +22,8 @@ func randomString(length int) string {
 }
 
 func init() {
-	rand.Seed(time.Now().UnixNano())
+	// Note: rand.Seed() is deprecated in Go 1.20+
+	// The global random number generator is automatically seeded
 	f := gofakeit.New(0)
 	bcl.RegisterFunction("fake_uuid", func(args ...any) (any, error) {
 		return f.UUID(), nil

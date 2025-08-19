@@ -3,7 +3,7 @@ package migrate
 import (
 	"fmt"
 	"strconv"
-	
+
 	"github.com/oarkflow/cli/contracts"
 )
 
@@ -27,6 +27,12 @@ func (c *RollbackCommand) Extend() contracts.Extend {
 				Aliases: []string{"v"},
 				Usage:   "Enable verbose output",
 				Value:   "false",
+			},
+			{
+				Name:    "step",
+				Aliases: []string{"s"},
+				Usage:   "Number of migrations to rollback (default: 1)",
+				Value:   "1",
 			},
 		},
 	}

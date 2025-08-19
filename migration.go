@@ -17,7 +17,7 @@ const (
 )
 
 var tableSchemas = make(map[string]*CreateTable)
-var schemaMutex sync.Mutex
+var schemaMutex sync.RWMutex
 
 type Config struct {
 	Migration Migration `json:"Migration"`
@@ -393,7 +393,14 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 	if !ok {
 		return nil, fmt.Errorf("table schema for %s not found; cannot recreate table for alteration", at.Name)
 	}
-	newSchema := *origSchema
+	// Deep copy the schema to avoid modifying the original
+	newSchema := CreateTable{
+		Name:       origSchema.Name,
+		PrimaryKey: make([]string, len(origSchema.PrimaryKey)),
+		Columns:    make([]AddColumn, len(origSchema.Columns)),
+	}
+	copy(newSchema.PrimaryKey, origSchema.PrimaryKey)
+	copy(newSchema.Columns, origSchema.Columns)
 	renameMap := make(map[string]string)
 	if len(at.DropColumn) > 0 || len(at.RenameColumn) > 0 {
 		for _, dropCol := range at.DropColumn {
@@ -541,7 +548,14 @@ func (op Operation) ToSQL(dialect string) ([]string, error) {
 		}
 		if dialect == DialectSQLite {
 			schemaMutex.Lock()
-			cpy := ct
+			// Deep copy to avoid race conditions
+			cpy := CreateTable{
+				Name:       ct.Name,
+				PrimaryKey: make([]string, len(ct.PrimaryKey)),
+				Columns:    make([]AddColumn, len(ct.Columns)),
+			}
+			copy(cpy.PrimaryKey, ct.PrimaryKey)
+			copy(cpy.Columns, ct.Columns)
 			tableSchemas[ct.Name] = &cpy
 			schemaMutex.Unlock()
 		}

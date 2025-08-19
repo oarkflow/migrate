@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -92,6 +91,33 @@ func WithDialect(dialect string) ManagerOption {
 	}
 }
 
+func WithConfig(config *MigrateConfig) ManagerOption {
+	return func(m *Manager) {
+		// Apply configuration settings
+		m.migrationDir = config.Migration.Directory
+		m.seedDir = config.Seed.Directory
+		m.dialect = config.Database.Driver
+		m.Verbose = config.Logging.Verbose
+
+		// Set up database driver if configuration is complete
+		if config.Database.Driver != "" && config.Database.Database != "" {
+			dsn := config.GetDSN()
+			if dsn != "" {
+				driver, err := NewDriver(config.Database.Driver, dsn)
+				if err == nil {
+					m.dbDriver = driver
+
+					// Set up history driver
+					historyDriver, err := NewHistoryDriver("db", config.Database.Driver, dsn, config.Migration.TableName)
+					if err == nil {
+						m.historyDriver = historyDriver
+					}
+				}
+			}
+		}
+	}
+}
+
 func defaultManager(client contracts.Cli) *Manager {
 	return &Manager{
 		migrationDir:  "migrations",
@@ -103,7 +129,6 @@ func defaultManager(client contracts.Cli) *Manager {
 }
 
 func NewManager(opts ...ManagerOption) *Manager {
-
 	cli.SetName(Name)
 	cli.SetVersion(Version)
 	app := cli.New()
@@ -127,9 +152,38 @@ func NewManager(opts ...ManagerOption) *Manager {
 		&ValidateCommand{Driver: m},
 		&SeedCommand{Driver: m},
 		&MakeSeedCommand{Driver: m},
-		&HistoryCommand{Driver: m}, // <-- Register the new command
+		&HistoryCommand{Driver: m},
+		&ConfigCommand{Driver: m},
+		&ConfigInitCommand{Driver: m},
+		&ConfigValidateCommand{Driver: m},
+		&ConfigShowCommand{Driver: m},
+		&StatusCommand{Driver: m},
 	})
 	return m
+}
+
+// NewManagerFromConfig creates a new manager from configuration file
+func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, error) {
+	// Load configuration
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Apply environment overrides
+	config.ApplyEnvironmentOverrides()
+
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Create manager with configuration
+	allOpts := []ManagerOption{WithConfig(config)}
+	allOpts = append(allOpts, opts...)
+
+	manager := NewManager(allOpts...)
+	return manager, nil
 }
 
 func (d *Manager) Run() {
@@ -157,22 +211,33 @@ func (d *Manager) ValidateHistoryStorage() error {
 }
 
 func (d *Manager) ApplyMigration(m Migration) error {
+	// Validate migration name
+	if err := requireFields(m.Name); err != nil {
+		return fmt.Errorf("ApplyMigration: invalid migration name: %w", err)
+	}
+
 	path := filepath.Join(d.migrationDir, m.Name+".bcl")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read migration file: %w", err)
+		return fmt.Errorf("failed to read migration file %s: %w", path, err)
 	}
+
 	checksum := computeChecksum(data)
 	histories, err := d.historyDriver.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load migration history: %w", err)
 	}
+
+	// Check if migration already applied
 	for _, h := range histories {
 		if h.Name == m.Name {
 			if h.Checksum == checksum {
+				if d.Verbose {
+					logger.Info().Msgf("Migration '%s' already applied, skipping", m.Name)
+				}
 				return nil
 			}
-			return errors.New("changes found in migration file after migration was applied")
+			return fmt.Errorf("migration '%s' has been modified after being applied (checksum mismatch)", m.Name)
 		}
 	}
 	var cfg Config
@@ -195,7 +260,13 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		}
 	}
 	if d.dbDriver == nil {
-		return fmt.Errorf("no database driver configured")
+		return fmt.Errorf("no database driver configured for migration '%s'", m.Name)
+	}
+
+	// Validate that we have operations to perform
+	if len(queries) == 0 {
+		logger.Info().Msgf("Migration '%s' has no operations to perform", m.Name)
+		return nil
 	}
 	for _, val := range migration.Validate {
 		if err := runPreUpChecks(val.PreUpChecks); err != nil {
@@ -223,13 +294,28 @@ func (d *Manager) ApplyMigration(m Migration) error {
 }
 
 func (d *Manager) RollbackMigration(step int) error {
+	if d.dbDriver == nil {
+		return fmt.Errorf("no database driver configured for rollback")
+	}
+
 	histories, err := d.historyDriver.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load migration history: %w", err)
 	}
+
 	total := len(histories)
-	if step <= 0 || step > total {
-		return fmt.Errorf("rollback step %d is out of range, total applied: %d", step, total)
+	if total == 0 {
+		logger.Info().Msg("No migrations to rollback")
+		return nil
+	}
+
+	if step <= 0 {
+		return fmt.Errorf("rollback step must be positive, got: %d", step)
+	}
+
+	if step > total {
+		logger.Info().Msgf("Requested rollback steps (%d) exceeds total applied migrations (%d), rolling back all", step, total)
+		step = total
 	}
 	for i := 0; i < step; i++ {
 		last := histories[len(histories)-1]
@@ -691,21 +777,45 @@ func runPostUpChecks(checks []string) error {
 }
 
 func (d *Manager) RunSeeds(truncate bool, seedFiles ...string) error {
+	if d.dbDriver == nil {
+		return fmt.Errorf("no database driver configured for seeding")
+	}
+
+	if len(seedFiles) == 0 {
+		logger.Info().Msg("No seed files provided")
+		return nil
+	}
+
 	for _, seedFile := range seedFiles {
+		// Validate seed file path
+		if seedFile == "" {
+			logger.Warn().Msg("Empty seed file path, skipping")
+			continue
+		}
+
 		data, err := os.ReadFile(seedFile)
 		if err != nil {
-			return fmt.Errorf("failed to read seed file: %w", err)
+			return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
 		}
+
 		var cfg SeedConfig
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("failed to unmarshal seed file: %w", err)
+			return fmt.Errorf("failed to unmarshal seed file '%s': %w", seedFile, err)
 		}
+
+		// Validate seed configuration
+		if err := requireFields(cfg.Seed.Name, cfg.Seed.Table); err != nil {
+			return fmt.Errorf("invalid seed configuration in '%s': %w", seedFile, err)
+		}
+
 		queries, err := cfg.Seed.ToSQL(d.dialect)
 		if err != nil {
-			return fmt.Errorf("failed to generate seed SQL: %w", err)
+			return fmt.Errorf("failed to generate seed SQL for '%s': %w", seedFile, err)
 		}
-		if d.dbDriver == nil {
-			return fmt.Errorf("no database driver configured")
+
+		if len(queries) == 0 {
+			logger.Info().Msgf("Seed file '%s' generated no queries, skipping", seedFile)
+			continue
 		}
 		if truncate {
 			query := getTruncateSQL(d.dialect, cfg.Seed.Table)

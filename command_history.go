@@ -574,7 +574,14 @@ func generateHTMLReportAllObjectsTemplate(
 	}
 
 	// Load and execute template
-	tmplPath := filepath.Join("templates/history.html")
+	tmplPath := filepath.Join("examples", "templates", "history.html")
+
+	// Check if template file exists
+	if _, err := os.Stat(tmplPath); os.IsNotExist(err) {
+		// Fallback to embedded template if file doesn't exist
+		return generateFallbackHTMLReport(allObjects, reports)
+	}
+
 	tmpl, err := template.New("history.html").
 		Funcs(template.FuncMap{
 			"safeHTML": func(s string) template.HTML { return template.HTML(s) },
@@ -582,7 +589,8 @@ func generateHTMLReportAllObjectsTemplate(
 		}).
 		ParseFiles(tmplPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
+		// Fallback to embedded template on parse error
+		return generateFallbackHTMLReport(allObjects, reports)
 	}
 
 	data := HistoryReportTemplateData{
@@ -595,4 +603,129 @@ func generateHTMLReportAllObjectsTemplate(
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// generateFallbackHTMLReport creates a basic HTML report when template file is not available
+func generateFallbackHTMLReport(allObjects []objectInfo, reports map[string]ObjectReport) (string, error) {
+	var html strings.Builder
+
+	html.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+	   <meta charset="UTF-8">
+	   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	   <title>Migration History Report</title>
+	   <style>
+	       body { font-family: Arial, sans-serif; margin: 20px; }
+	       .container { max-width: 1200px; margin: 0 auto; }
+	       .object-section { margin-bottom: 30px; border: 1px solid #ddd; padding: 20px; }
+	       .object-title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+	       .migration-group { margin-bottom: 20px; }
+	       .migration-title { font-size: 18px; font-weight: bold; color: #333; }
+	       .migration-date { color: #666; font-size: 14px; }
+	       .action { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+	       .action-type { font-weight: bold; color: #0066cc; }
+	       .column-list { list-style-type: none; padding: 0; }
+	       .column-list li { margin: 5px 0; }
+	       .badge { padding: 2px 6px; border-radius: 3px; font-size: 12px; margin-left: 5px; }
+	       .badge-pk { background: #28a745; color: white; }
+	       .badge-unique { background: #17a2b8; color: white; }
+	       .badge-nullable { background: #6c757d; color: white; }
+	       pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+	   </style>
+</head>
+<body>
+	   <div class="container">
+	       <h1>Migration History Report</h1>
+	       <p>Generated on: ` + time.Now().Format(time.RFC3339) + `</p>`)
+
+	for _, obj := range allObjects {
+		report := reports[obj.Name]
+		html.WriteString(fmt.Sprintf(`
+	       <div class="object-section">
+	           <div class="object-title">%s (%s)</div>`, obj.Name, obj.Type))
+
+		if len(report.History) == 0 {
+			html.WriteString(`<p>No migration history found.</p>`)
+		} else {
+			for _, group := range report.History {
+				html.WriteString(fmt.Sprintf(`
+	           <div class="migration-group">
+	               <div class="migration-title">%s</div>
+	               <div class="migration-date">%s</div>`,
+					group.MigrationName, group.Date.Format(time.RFC3339)))
+
+				for _, action := range group.Actions {
+					html.WriteString(fmt.Sprintf(`
+	               <div class="action">
+	                   <span class="action-type">%s</span>`, action.Operation))
+
+					switch action.Operation {
+					case "CreateTable":
+						if action.CreateTable != nil {
+							html.WriteString(`<ul class="column-list">`)
+							for _, col := range action.CreateTable.Columns {
+								html.WriteString(fmt.Sprintf(`<li><strong>%s</strong> <code>%s</code>`, col.Name, col.Type))
+								if col.PrimaryKey {
+									html.WriteString(`<span class="badge badge-pk">PK</span>`)
+								}
+								if col.Unique {
+									html.WriteString(`<span class="badge badge-unique">Unique</span>`)
+								}
+								if col.Nullable {
+									html.WriteString(`<span class="badge badge-nullable">Nullable</span>`)
+								}
+								html.WriteString(`</li>`)
+							}
+							html.WriteString(`</ul>`)
+						}
+					case "AddColumn":
+						if action.Column != nil {
+							html.WriteString(fmt.Sprintf(`: <strong>%s</strong> <code>%s</code>`, action.Column.Name, action.Column.Type))
+						}
+					case "DropColumn":
+						if action.DropColumn != nil {
+							html.WriteString(fmt.Sprintf(`: <strong>%s</strong>`, action.DropColumn.Name))
+						}
+					case "RenameColumn":
+						if action.RenameColumn != nil {
+							html.WriteString(fmt.Sprintf(`: <strong>%s</strong> → <strong>%s</strong>`, action.RenameColumn.From, action.RenameColumn.To))
+						}
+					}
+					html.WriteString(`</div>`)
+				}
+				html.WriteString(`</div>`)
+			}
+		}
+
+		// Show current state
+		if report.FinalTable != nil && !report.Dropped {
+			html.WriteString(`<h3>Current State</h3><ul class="column-list">`)
+			for _, col := range report.FinalTable.Columns {
+				html.WriteString(fmt.Sprintf(`<li><strong>%s</strong> <code>%s</code>`, col.Name, col.Type))
+				if col.PrimaryKey {
+					html.WriteString(`<span class="badge badge-pk">PK</span>`)
+				}
+				if col.Unique {
+					html.WriteString(`<span class="badge badge-unique">Unique</span>`)
+				}
+				if col.Nullable {
+					html.WriteString(`<span class="badge badge-nullable">Nullable</span>`)
+				}
+				html.WriteString(`</li>`)
+			}
+			html.WriteString(`</ul>`)
+		} else if report.Dropped {
+			html.WriteString(`<p><em>This object has been dropped.</em></p>`)
+		}
+
+		html.WriteString(`</div>`)
+	}
+
+	html.WriteString(`
+	   </div>
+</body>
+</html>`)
+
+	return html.String(), nil
 }

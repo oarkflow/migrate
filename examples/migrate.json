@@ -1,0 +1,52 @@
+{
+    "_comment": "Sample configuration file for migrate tool",
+    "database": {
+        "_comment": "Database connection settings",
+        "charset": "utf8mb4",
+        "database": "sujit",
+        "driver": "postgres",
+        "host": "localhost",
+        "password": "postgres",
+        "port": 5432,
+        "ssl_mode": "disable",
+        "timeout": 30,
+        "username": "postgres"
+    },
+    "logging": {
+        "_comment": "Logging settings",
+        "format": "text",
+        "level": "info",
+        "log_file": "/path/to/migrate.log",
+        "output": "console",
+        "verbose": false
+    },
+    "migration": {
+        "_comment": "Migration settings",
+        "auto_rollback": false,
+        "batch_size": 100,
+        "directory": "migrations",
+        "dry_run": false,
+        "lock_timeout": 300,
+        "skip_validation": false,
+        "table_name": "migrations"
+    },
+    "seed": {
+        "_comment": "Seed settings",
+        "batch_size": 1000,
+        "default_rows": 10,
+        "directory": "migrations/seeds",
+        "truncate_first": false
+    },
+    "validation": {
+        "_comment": "Validation settings",
+        "enabled": true,
+        "forbidden_names": [
+            "temp",
+            "tmp",
+            "test"
+        ],
+        "max_identifier_length": 64,
+        "require_description": true,
+        "strict_mode": false
+    }
+}

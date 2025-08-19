@@ -10,7 +10,7 @@ import (
 	"github.com/oarkflow/migrate"
 )
 
-func main() {
+func seedExample() {
 	data, err := os.ReadFile("seed.bcl")
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)

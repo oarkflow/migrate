@@ -3,6 +3,7 @@ package migrate
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,17 @@ import (
 	"github.com/oarkflow/squealx/drivers/postgres"
 	"github.com/oarkflow/squealx/drivers/sqlite"
 )
+
+// isValidIdentifier checks if a string is a valid SQL identifier
+// to prevent SQL injection attacks
+func isValidIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	// Allow alphanumeric characters and underscores, must start with letter or underscore
+	matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, name)
+	return matched && len(name) <= 64 // reasonable length limit
+}
 
 // MigrationHistory holds a migration history record.
 type MigrationHistory struct {
@@ -172,7 +184,15 @@ func (d *DatabaseHistoryDriver) Save(history MigrationHistory) error {
 
 func (d *DatabaseHistoryDriver) Load() ([]MigrationHistory, error) {
 	var histories []MigrationHistory
-	query := fmt.Sprintf(`SELECT * FROM %s ORDER BY applied_at ASC;`, d.table)
+	// Use parameterized query to prevent SQL injection
+	query := `SELECT id, name, version, description, checksum, applied_at FROM migrations ORDER BY applied_at ASC`
+	if d.table != "migrations" {
+		// Validate table name to prevent SQL injection
+		if !isValidIdentifier(d.table) {
+			return nil, fmt.Errorf("invalid table name: %s", d.table)
+		}
+		query = fmt.Sprintf(`SELECT id, name, version, description, checksum, applied_at FROM "%s" ORDER BY applied_at ASC`, d.table)
+	}
 	err := d.db.Select(&histories, query)
 	if err != nil {
 		return nil, err
@@ -195,17 +215,27 @@ func (f *FileHistoryDriver) Rollback(histories ...MigrationHistory) error {
 
 // DatabaseHistoryDriver: implement Rollback by executing a DELETE query.
 func (d *DatabaseHistoryDriver) Rollback(histories ...MigrationHistory) error {
-	var migrations []string
-	for _, h := range histories {
-		migrations = append(migrations, fmt.Sprintf("'%s'", h.Name))
+	// Validate table name to prevent SQL injection
+	if !isValidIdentifier(d.table) {
+		return fmt.Errorf("invalid table name: %s", d.table)
 	}
-	migrationList := strings.Join(migrations, ", ")
-	var query string
-	if migrationList == "" {
-		query = fmt.Sprintf("DELETE FROM %s", d.table)
-	} else {
-		query = fmt.Sprintf("DELETE FROM %s WHERE name NOT IN (%s);", d.table, migrationList)
+
+	if len(histories) == 0 {
+		// Delete all records
+		query := fmt.Sprintf(`DELETE FROM "%s"`, d.table)
+		_, err := d.db.Exec(query)
+		return err
 	}
-	_, err := d.db.Exec(query)
+
+	// Use parameterized query to prevent SQL injection
+	placeholders := make([]string, len(histories))
+	args := make([]interface{}, len(histories))
+	for i, h := range histories {
+		placeholders[i] = "?"
+		args[i] = h.Name
+	}
+
+	query := fmt.Sprintf(`DELETE FROM "%s" WHERE name NOT IN (%s)`, d.table, strings.Join(placeholders, ", "))
+	_, err := d.db.Exec(query, args...)
 	return err
 }

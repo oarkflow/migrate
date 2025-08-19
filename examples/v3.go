@@ -9,7 +9,7 @@ import (
 	"github.com/oarkflow/migrate"
 )
 
-func main() {
+func ma2in() {
 	data, err := os.ReadFile("migrations/1748976351_create_seo_metadatas_table.bcl")
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)
