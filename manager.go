@@ -124,22 +124,23 @@ func WithConfig(config *MigrateConfig) ManagerOption {
 	}
 }
 
-func defaultManager(client contracts.Cli) *Manager {
+func WithClient(client contracts.Cli) ManagerOption {
+	return func(m *Manager) {
+		m.client = client
+	}
+}
+
+func defaultManager() *Manager {
 	return &Manager{
 		migrationDir:  "migrations",
 		seedDir:       "migrations/seeds",
 		dialect:       "postgres",
 		historyDriver: NewFileHistoryDriver("migration_history.txt"),
-		client:        client,
 	}
 }
 
 func NewManager(opts ...ManagerOption) *Manager {
-	cli.SetName(Name)
-	cli.SetVersion(Version)
-	app := cli.New()
-	client := app.Instance.Client()
-	m := defaultManager(client)
+	m := defaultManager()
 	for _, opt := range opts {
 		opt(m)
 	}
@@ -149,7 +150,11 @@ func NewManager(opts ...ManagerOption) *Manager {
 	if err := os.MkdirAll(m.seedDir, fs.ModePerm); err != nil {
 		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
 	}
-	cmds := append([]contracts.Command{
+	return m
+}
+
+func GetCommands(m *Manager) []contracts.Command {
+	return []contracts.Command{
 		&MakeMigrationCommand{Driver: m},
 		&MigrateCommand{Driver: m},
 		&RollbackCommand{Driver: m},
@@ -163,9 +168,7 @@ func NewManager(opts ...ManagerOption) *Manager {
 		&ConfigValidateCommand{Driver: m},
 		&ConfigShowCommand{Driver: m},
 		&StatusCommand{Driver: m},
-	}, m.command...)
-	client.Register(cmds)
-	return m
+	}
 }
 
 // NewManagerFromConfig creates a new manager from configuration file
@@ -192,7 +195,19 @@ func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, e
 	return manager, nil
 }
 
-func (d *Manager) Run() {
+func (d *Manager) Run(clients ...contracts.Cli) {
+	var client contracts.Cli
+	if len(clients) > 0 {
+		client = clients[0]
+	} else {
+		cli.SetName(Name)
+		cli.SetVersion(Version)
+		app := cli.New()
+		client = app.Instance.Client()
+	}
+	d.client = client
+	cmds := append(GetCommands(d), d.command...)
+	client.Register(cmds)
 	d.client.Run(os.Args, true)
 }
 

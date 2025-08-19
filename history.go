@@ -153,6 +153,16 @@ func SetupMigrationHistoryTable(dialect string, db *squealx.DB, table string) er
 	return nil
 }
 
+func NewDatabaseHistoryDriverFromDB(db *squealx.DB, dialect, table string) (HistoryDriver, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is nil")
+	}
+	if !isValidIdentifier(table) {
+		return nil, fmt.Errorf("invalid table name: %s", table)
+	}
+	return &DatabaseHistoryDriver{db: db, dialect: dialect, table: table}, nil
+}
+
 // NewDatabaseHistoryDriver creates a new database history driver using squealx.
 func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDriver, error) {
 	db, err := NewDB(dialect, dsn)
