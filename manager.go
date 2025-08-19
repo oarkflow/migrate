@@ -471,8 +471,17 @@ func (d *Manager) CreateSeedFile(name string) error {
 }
 
 func (d *Manager) CreateMigrationFile(name string) error {
-	name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
-	filename := filepath.Join(d.migrationDir, name+".bcl")
+	var filename string
+	if strings.Contains(name, string(os.PathSeparator)) {
+		dir := filepath.Dir(name)
+		name = filepath.Base(name)
+		name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
+		os.MkdirAll(filepath.Join(d.migrationDir, dir), fs.ModePerm)
+		filename = filepath.Join(d.migrationDir, dir, name+".bcl")
+	} else {
+		filename = filepath.Join(d.migrationDir, name+".bcl")
+	}
+
 	tokens := strings.Split(name, "_")
 	var template string
 	if len(tokens) < 2 {
