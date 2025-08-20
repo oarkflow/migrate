@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	
+
 	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli/contracts"
 )
@@ -69,11 +69,29 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	if err := c.Driver.ValidateMigrations(); err != nil {
 		logger.Printf("Validation warning: %v", err)
 	}
-	files, err := os.ReadDir(c.Driver.MigrationDir())
+	// Recursively find all .bcl migration files except those in SeedDir
+	var migrationFiles []string
+	seedDir := c.Driver.SeedDir()
+	err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip SeedDir and its subdirectories
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+			migrationFiles = append(migrationFiles, path)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to read migration directory: %w", err)
+		return fmt.Errorf("failed to walk migration directory: %w", err)
 	}
-	
+
 	seedFlag := ctx.Option("seed")
 	seedRows := 10
 	if rowsStr := ctx.Option("rows"); rowsStr != "" {
@@ -82,13 +100,9 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		}
 	}
 	shouldSeed := seedFlag == "true" || seedFlag == "1"
-	
-	for _, file := range files {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".bcl") {
-			continue
-		}
-		name := strings.TrimSuffix(file.Name(), ".bcl")
-		path := filepath.Join(c.Driver.MigrationDir(), file.Name())
+
+	for _, path := range migrationFiles {
+		name := strings.TrimSuffix(filepath.Base(path), ".bcl")
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", name, err)
@@ -98,7 +112,6 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			return fmt.Errorf("failed to unmarshal migration file %s: %w", name, err)
 		}
 		migration := cfg.Migration
-		// Add requiredFields check for migration.Name
 		if err := requireFields(migration.Name); err != nil {
 			return fmt.Errorf("MigrateCommand.Handle: %w", err)
 		}
@@ -116,11 +129,9 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 				return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
 			}
 		}
-		
 		// --- SEEDING LOGIC ---
 		if shouldSeed {
 			for _, ct := range migration.Up.CreateTable {
-				// Add requiredFields check for ct.Name
 				if err := requireFields(ct.Name); err != nil {
 					return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
 				}
@@ -130,7 +141,6 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 					Rows:  seedRows,
 				}
 				for _, col := range ct.Columns {
-					// Add requiredFields check for col.Name
 					if err := requireFields(col.Name); err != nil {
 						return fmt.Errorf("MigrateCommand.Handle (seed column): %w", err)
 					}
@@ -156,7 +166,6 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 						seedDef.Fields = append(seedDef.Fields, fd)
 						continue
 					}
-					// Map data type to fake_ function
 					fakeFunc := "fake_string"
 					switch strings.ToLower(col.Type) {
 					case "int", "integer", "number", "smallint", "mediumint", "bigint", "tinyint":

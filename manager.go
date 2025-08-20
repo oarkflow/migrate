@@ -238,10 +238,24 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		return fmt.Errorf("ApplyMigration: invalid migration name: %w", err)
 	}
 
-	path := filepath.Join(d.migrationDir, m.Name+".bcl")
-	data, err := os.ReadFile(path)
+	// The migration file may be nested, so search for the file by name
+	var migrationPath string
+	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") && strings.TrimSuffix(info.Name(), ".bcl") == m.Name {
+			migrationPath = path
+			return fmt.Errorf("found") // break walk
+		}
+		return nil
+	})
+	if migrationPath == "" {
+		return fmt.Errorf("migration file for '%s' not found in '%s'", m.Name, d.migrationDir)
+	}
+	data, err := os.ReadFile(migrationPath)
 	if err != nil {
-		return fmt.Errorf("failed to read migration file %s: %w", path, err)
+		return fmt.Errorf("failed to read migration file %s: %w", migrationPath, err)
 	}
 
 	checksum := computeChecksum(data)
@@ -267,7 +281,6 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		return fmt.Errorf("failed to unmarshal migration file: %w", err)
 	}
 	migration := cfg.Migration
-	// Add requiredFields check for migration.Name
 	if err := requireFields(migration.Name); err != nil {
 		return fmt.Errorf("ApplyMigration: %w", err)
 	}
@@ -284,8 +297,6 @@ func (d *Manager) ApplyMigration(m Migration) error {
 	if d.dbDriver == nil {
 		return fmt.Errorf("no database driver configured for migration '%s'", m.Name)
 	}
-
-	// Validate that we have operations to perform
 	if len(queries) == 0 {
 		logger.Info().Msgf("Migration '%s' has no operations to perform", m.Name)
 		return nil
@@ -339,10 +350,28 @@ func (d *Manager) RollbackMigration(step int) error {
 		logger.Info().Msgf("Requested rollback steps (%d) exceeds total applied migrations (%d), rolling back all", step, total)
 		step = total
 	}
+	// Build a map of migration name to path for all .bcl files
+	migrationMap := make(map[string]string)
+	err = filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+			name := strings.TrimSuffix(info.Name(), ".bcl")
+			migrationMap[name] = path
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk migration directory: %w", err)
+	}
 	for i := 0; i < step; i++ {
 		last := histories[len(histories)-1]
 		name := last.Name
-		path := filepath.Join(d.migrationDir, name+".bcl")
+		path, ok := migrationMap[name]
+		if !ok {
+			return fmt.Errorf("migration file for %s not found", name)
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s for rollback: %w", name, err)
@@ -352,7 +381,6 @@ func (d *Manager) RollbackMigration(step int) error {
 			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
 		}
 		migration := cfg.Migration
-		// Add requiredFields check for migration.Name
 		if err := requireFields(migration.Name); err != nil {
 			return fmt.Errorf("RollbackMigration: %w", err)
 		}
@@ -360,7 +388,6 @@ func (d *Manager) RollbackMigration(step int) error {
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
 		}
-		// If in verbose mode, show rollback details.
 		if d.Verbose {
 			logger.Info().Msgf("Rollback of migration '%s' details:", name)
 			for _, q := range downQueries {
@@ -384,9 +411,27 @@ func (d *Manager) ResetMigrations() error {
 		return err
 	}
 
+	// Build a map of migration name to path for all .bcl files
+	migrationMap := make(map[string]string)
+	err = filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+			name := strings.TrimSuffix(info.Name(), ".bcl")
+			migrationMap[name] = path
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk migration directory: %w", err)
+	}
 	for i := len(histories) - 1; i >= 0; i-- {
 		name := histories[i].Name
-		path := filepath.Join(d.migrationDir, name+".bcl")
+		path, ok := migrationMap[name]
+		if !ok {
+			return fmt.Errorf("migration file for %s not found", name)
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s for rollback: %w", name, err)
@@ -396,7 +441,6 @@ func (d *Manager) ResetMigrations() error {
 			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
 		}
 		migration := cfg.Migration
-		// Add requiredFields check for migration.Name
 		if err := requireFields(migration.Name); err != nil {
 			return fmt.Errorf("ResetMigrations: %w", err)
 		}
@@ -417,26 +461,33 @@ func (d *Manager) ResetMigrations() error {
 }
 
 func (d *Manager) ValidateMigrations() error {
-	files, err := os.ReadDir(d.migrationDir)
+	// Recursively find all .bcl migration files
+	var migrationFiles []string
+	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+			migrationFiles = append(migrationFiles, path)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to read migration directory: %w", err)
+		return fmt.Errorf("failed to walk migration directory: %w", err)
 	}
 	histories, err := d.historyDriver.Load()
 	if err != nil {
 		return err
 	}
-
 	applied := make(map[string]bool)
 	for _, h := range histories {
 		applied[h.Name] = true
 	}
 	var missing []string
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".bcl") {
-			name := strings.TrimSuffix(file.Name(), ".bcl")
-			if !applied[name] {
-				missing = append(missing, name)
-			}
+	for _, path := range migrationFiles {
+		name := strings.TrimSuffix(filepath.Base(path), ".bcl")
+		if !applied[name] {
+			missing = append(missing, name)
 		}
 	}
 	toApply := len(missing)
@@ -474,11 +525,12 @@ func (d *Manager) CreateMigrationFile(name string) error {
 	var filename string
 	if strings.Contains(name, string(os.PathSeparator)) {
 		dir := filepath.Dir(name)
-		name = filepath.Base(name)
-		name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
+		base := filepath.Base(name)
+		name = fmt.Sprintf("%d_%s", time.Now().Unix(), base)
 		os.MkdirAll(filepath.Join(d.migrationDir, dir), fs.ModePerm)
 		filename = filepath.Join(d.migrationDir, dir, name+".bcl")
 	} else {
+		name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
 		filename = filepath.Join(d.migrationDir, name+".bcl")
 	}
 

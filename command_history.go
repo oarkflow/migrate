@@ -79,22 +79,33 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	objectName := ctx.Option("object")
 	serveFlag := ctx.Option("serve") == "true"
 
-	files, err := os.ReadDir(c.Driver.MigrationDir())
-	if err != nil {
-		return fmt.Errorf("failed to read migration directory: %w", err)
-	}
-
-	var fileNames []string
-	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".bcl") {
-			fileNames = append(fileNames, f.Name())
+	// Recursively find all .bcl migration files except those in SeedDir
+	var filePaths []string
+	seedDir := c.Driver.SeedDir()
+	err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
+		// Skip SeedDir and its subdirectories
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+			filePaths = append(filePaths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk migration directory: %w", err)
 	}
-	sort.Strings(fileNames)
+	// Sort by filename (timestamp prefix)
+	sort.Strings(filePaths)
 
 	objectSet := make(map[string]string)
-	for _, fname := range fileNames {
-		path := filepath.Join(c.Driver.MigrationDir(), fname)
+	for _, path := range filePaths {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -136,7 +147,7 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 		allObjects = append(allObjects, objectInfo{Name: objectName, Type: typ})
 	}
 
-	report, err := generateHTMLReportAllObjectsTemplate(allObjects, fileNames, c.Driver.MigrationDir())
+	report, err := generateHTMLReportAllObjectsTemplate(allObjects, filePaths, c.Driver.MigrationDir())
 	if err != nil {
 		return err
 	}
@@ -283,7 +294,7 @@ type HistoryReportTemplateData struct {
 // Main template-based report generator
 func generateHTMLReportAllObjectsTemplate(
 	allObjects []objectInfo,
-	fileNames []string,
+	filePaths []string,
 	migrationDir string,
 ) (string, error) {
 	reports := make(map[string]ObjectReport)
@@ -299,8 +310,7 @@ func generateHTMLReportAllObjectsTemplate(
 		// For structure snapshots after each migration
 		var migrationGroups []MigrationGroup
 
-		for _, fname := range fileNames {
-			path := filepath.Join(migrationDir, fname)
+		for _, path := range filePaths {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				continue
@@ -310,7 +320,7 @@ func generateHTMLReportAllObjectsTemplate(
 				continue
 			}
 			m := cfg.Migration
-			createdAt := extractTimeFromFilename(fname)
+			createdAt := extractTimeFromFilename(filepath.Base(path))
 
 			// TABLES
 			for _, ct := range m.Up.CreateTable {
@@ -709,10 +719,10 @@ func generateHTMLReportAllObjectsTemplate(
 	}
 
 	// Calculate TotalMigrations and LastUpdated for template
-	totalMigrations := len(fileNames)
+	totalMigrations := len(filePaths)
 	var lastUpdated string
 	if totalMigrations > 0 {
-		lastUpdated = extractTimeFromFilename(fileNames[len(fileNames)-1]).Format("2006-01-02 15:04:05")
+		lastUpdated = extractTimeFromFilename(filepath.Base(filePaths[len(filePaths)-1])).Format("2006-01-02 15:04:05")
 	} else {
 		lastUpdated = "N/A"
 	}
