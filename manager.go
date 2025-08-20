@@ -240,9 +240,17 @@ func (d *Manager) ApplyMigration(m Migration) error {
 
 	// The migration file may be nested, so search for the file by name
 	var migrationPath string
+	seedDir := d.SeedDir()
 	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		// Skip SeedDir and its subdirectories
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") && strings.TrimSuffix(info.Name(), ".bcl") == m.Name {
 			migrationPath = path
@@ -352,9 +360,17 @@ func (d *Manager) RollbackMigration(step int) error {
 	}
 	// Build a map of migration name to path for all .bcl files
 	migrationMap := make(map[string]string)
+	seedDir := d.SeedDir()
 	err = filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		// Skip SeedDir and its subdirectories
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
 			name := strings.TrimSuffix(info.Name(), ".bcl")
@@ -413,9 +429,17 @@ func (d *Manager) ResetMigrations() error {
 
 	// Build a map of migration name to path for all .bcl files
 	migrationMap := make(map[string]string)
+	seedDir := d.SeedDir()
 	err = filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		// Skip SeedDir and its subdirectories
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
 			name := strings.TrimSuffix(info.Name(), ".bcl")
@@ -463,9 +487,17 @@ func (d *Manager) ResetMigrations() error {
 func (d *Manager) ValidateMigrations() error {
 	// Recursively find all .bcl migration files
 	var migrationFiles []string
+	seedDir := d.SeedDir()
 	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		// Skip SeedDir and its subdirectories
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
 			migrationFiles = append(migrationFiles, path)
@@ -931,7 +963,7 @@ func getTruncateSQL(dialect string, table string) string {
 	switch dialect {
 	case "mysql", "mariadb":
 		return fmt.Sprintf("TRUNCATE TABLE `%s`;", table)
-	case "postgres", "cockroachdb":
+	case "postgres", "cockroachdb", "postgresql", "pgx":
 		return fmt.Sprintf("TRUNCATE TABLE \"%s\" RESTART IDENTITY CASCADE;", table)
 	case "sqlite", "sqlite3":
 		return fmt.Sprintf("DELETE FROM `%s`;", table)
