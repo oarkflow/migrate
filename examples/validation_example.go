@@ -20,7 +20,7 @@ func validationExampleMain() {
 			CreateTable: []migrate.CreateTable{
 				{
 					Name: "users",
-					Columns: []migrate.AddColumn{
+					AddFields: []migrate.AddField{
 						{
 							Name:          "id",
 							Type:          "integer",
@@ -81,14 +81,14 @@ func validationExampleMain() {
 		Up: migrate.Operation{
 			CreateTable: []migrate.CreateTable{
 				{
-					Name:    "123invalid",          // Invalid table name - should fail
-					Columns: []migrate.AddColumn{}, // No columns - should fail
+					Name:      "123invalid",         // Invalid table name - should fail
+					AddFields: []migrate.AddField{}, // No fields - should fail
 				},
 				{
 					Name: "users",
-					Columns: []migrate.AddColumn{
+					AddFields: []migrate.AddField{
 						{
-							Name:  "user-name",    // Invalid column name - should fail
+							Name:  "user-name",    // Invalid field name - should fail
 							Type:  "invalid_type", // Invalid data type - should fail
 							Size:  -1,             // Negative size - should fail
 							Scale: 10,             // Scale > size - should fail
@@ -273,7 +273,7 @@ func migrationWorkflowExample() {
 			CreateTable: []migrate.CreateTable{
 				{
 					Name: "user_preferences",
-					Columns: []migrate.AddColumn{
+					AddFields: []migrate.AddField{
 						{Name: "id", Type: "integer", PrimaryKey: true, AutoIncrement: true},
 						{Name: "user_id", Type: "integer"},
 						{Name: "preference_key", Type: "string", Size: 100},

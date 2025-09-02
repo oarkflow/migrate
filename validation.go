@@ -62,7 +62,7 @@ func (v *Validator) Error() error {
 	return fmt.Errorf("validation failed:\n%s", strings.Join(messages, "\n"))
 }
 
-// ValidateIdentifier validates SQL identifiers (table names, column names, etc.)
+// ValidateIdentifier validates SQL identifiers (table names, field names, etc.)
 func (v *Validator) ValidateIdentifier(field, value string) {
 	if value == "" {
 		v.AddError(field, value, "identifier cannot be empty")
@@ -87,7 +87,7 @@ func (v *Validator) ValidateIdentifier(field, value string) {
 	}
 }
 
-// ValidateDataType validates column data types
+// ValidateDataType validates field data types
 func (v *Validator) ValidateDataType(field, value string) {
 	if value == "" {
 		v.AddError(field, value, "data type cannot be empty")
@@ -139,12 +139,12 @@ func (v *Validator) validateOperation(prefix string, op Operation) {
 		field := fmt.Sprintf("%s.create_table[%d]", prefix, i)
 		v.ValidateIdentifier(field+".name", ct.Name)
 
-		if len(ct.Columns) == 0 {
-			v.AddError(field+".columns", "", "table must have at least one column")
+		if len(ct.AddFields) == 0 {
+			v.AddError(field+".fields", "", "table must have at least one field")
 		}
 
-		for j, col := range ct.Columns {
-			colField := fmt.Sprintf("%s.columns[%d]", field, j)
+		for j, col := range ct.AddFields {
+			colField := fmt.Sprintf("%s.fields[%d]", field, j)
 			v.ValidateIdentifier(colField+".name", col.Name)
 			v.ValidateDataType(colField+".type", col.Type)
 
@@ -168,22 +168,22 @@ func (v *Validator) validateOperation(prefix string, op Operation) {
 		field := fmt.Sprintf("%s.alter_table[%d]", prefix, i)
 		v.ValidateIdentifier(field+".name", at.Name)
 
-		// Validate AddColumn operations
-		for j, col := range at.AddColumn {
-			colField := fmt.Sprintf("%s.add_column[%d]", field, j)
+		// Validate AddField operations
+		for j, col := range at.AddFields {
+			colField := fmt.Sprintf("%s.add_field[%d]", field, j)
 			v.ValidateIdentifier(colField+".name", col.Name)
 			v.ValidateDataType(colField+".type", col.Type)
 		}
 
-		// Validate DropColumn operations
-		for j, col := range at.DropColumn {
-			colField := fmt.Sprintf("%s.drop_column[%d]", field, j)
+		// Validate DropField operations
+		for j, col := range at.DropFields {
+			colField := fmt.Sprintf("%s.drop_field[%d]", field, j)
 			v.ValidateIdentifier(colField+".name", col.Name)
 		}
 
-		// Validate RenameColumn operations
-		for j, col := range at.RenameColumn {
-			colField := fmt.Sprintf("%s.rename_column[%d]", field, j)
+		// Validate RenameField operations
+		for j, col := range at.RenameFields {
+			colField := fmt.Sprintf("%s.rename_field[%d]", field, j)
 			v.ValidateIdentifier(colField+".from", col.From)
 			v.ValidateIdentifier(colField+".to", col.To)
 		}

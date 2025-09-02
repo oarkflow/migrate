@@ -25,7 +25,7 @@ func (s *SQLiteDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) 
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", s.quoteIdentifier(ct.Name)))
 		var cols []string
 		var pkCols []string
-		for _, col := range ct.Columns {
+		for _, col := range ct.AddFields {
 			colDef := fmt.Sprintf("%s %s", s.quoteIdentifier(col.Name), s.MapDataType(col.Type, col.Size, col.Scale, col.AutoIncrement))
 			if !col.Nullable {
 				colDef += " NOT NULL"
@@ -60,7 +60,7 @@ func (s *SQLiteDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) 
 		sb.WriteString(strings.Join(cols, ", "))
 		sb.WriteString(");")
 		var extra []string
-		for _, col := range ct.Columns {
+		for _, col := range ct.AddFields {
 			if col.Unique {
 				extra = append(extra, fmt.Sprintf("CREATE UNIQUE INDEX uniq_%s_%s ON %s (%s);", ct.Name, col.Name, s.quoteIdentifier(ct.Name), s.quoteIdentifier(col.Name)))
 			} else if col.Index {
@@ -106,9 +106,9 @@ func (s *SQLiteDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 	return "", errors.New("DROP SCHEMA is not supported in SQLite")
 }
 
-func (s *SQLiteDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, error) {
+func (s *SQLiteDialect) AddFieldSQL(ac AddField, tableName string) ([]string, error) {
 	if err := requireFields(ac.Name, tableName); err != nil {
-		return nil, fmt.Errorf("SQLiteDialect.AddColumnSQL: %w", err)
+		return nil, fmt.Errorf("SQLiteDialect.AddFieldSQL: %w", err)
 	}
 	var queries []string
 	var sb strings.Builder
@@ -144,18 +144,18 @@ func (s *SQLiteDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, 
 	return queries, nil
 }
 
-func (s *SQLiteDialect) DropColumnSQL(dc DropColumn, tableName string) (string, error) {
+func (s *SQLiteDialect) DropFieldSQL(dc DropField, tableName string) (string, error) {
 	if err := requireFields(dc.Name, tableName); err != nil {
-		return "", fmt.Errorf("SQLiteDialect.DropColumnSQL: %w", err)
+		return "", fmt.Errorf("SQLiteDialect.DropFieldSQL: %w", err)
 	}
-	return "", errors.New("SQLite DROP COLUMN must use table recreation")
+	return "", errors.New("SQLite DROP field must use table recreation")
 }
 
-func (s *SQLiteDialect) RenameColumnSQL(rc RenameColumn, tableName string) (string, error) {
+func (s *SQLiteDialect) RenameFieldSQL(rc RenameField, tableName string) (string, error) {
 	if err := requireFields(tableName); err != nil {
-		return "", fmt.Errorf("SQLiteDialect.RenameColumnSQL: %w", err)
+		return "", fmt.Errorf("SQLiteDialect.RenameFieldSQL: %w", err)
 	}
-	return "", errors.New("SQLite RENAME COLUMN must use table recreation")
+	return "", errors.New("SQLite RENAME field must use table recreation")
 }
 
 func (s *SQLiteDialect) MapDataType(genericType string, size, scale int, autoIncrement bool) string {
@@ -235,7 +235,7 @@ func (s *SQLiteDialect) RenameTriggerSQL(rt RenameTrigger) (string, error) {
 
 func (s *SQLiteDialect) RecreateTableForAlter(tableName string, newSchema CreateTable, renameMap map[string]string) ([]string, error) {
 	var newCols, selectCols []string
-	for _, col := range newSchema.Columns {
+	for _, col := range newSchema.AddFields {
 		newCols = append(newCols, col.Name)
 		orig := col.Name
 		for old, newName := range renameMap {
@@ -265,11 +265,11 @@ func (s *SQLiteDialect) EOS() string {
 	return ";"
 }
 
-func (s *SQLiteDialect) InsertSQL(table string, columns []string, values []any) (string, map[string]any, error) {
+func (s *SQLiteDialect) InsertSQL(table string, fields []string, values []any) (string, map[string]any, error) {
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string
-	for i, col := range columns {
+	for i, col := range fields {
 		quotedCols = append(quotedCols, s.quoteIdentifier(col))
 		paramName := ":" + col
 		namedParams = append(namedParams, paramName)

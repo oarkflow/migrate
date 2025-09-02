@@ -23,7 +23,7 @@ A powerful, flexible database migration tool for Go applications that supports m
 
 ### Data Types & Operations
 - **Table Operations:** Create, alter, drop, rename tables
-- **Column Operations:** Add, drop, rename columns with full type support
+- **Field Operations:** Add, drop, rename fields with full type support
 - **Index Management:** Create unique and regular indexes
 - **Constraint Support:** Primary keys, foreign keys, check constraints
 - **View Management:** Create, alter, drop views
@@ -80,21 +80,21 @@ Migration "1234567890_create_users_table" {
   Connection = "default"
   Up {
     CreateTable "users" {
-      Column "id" {
+      Field "id" {
         type = "integer"
         primary_key = true
         auto_increment = true
       }
-      Column "email" {
+      Field "email" {
         type = "string"
         size = 255
         unique = true
       }
-      Column "name" {
+      Field "name" {
         type = "string"
         size = 100
       }
-      Column "created_at" {
+      Field "created_at" {
         type = "datetime"
         default = "now()"
       }
@@ -211,12 +211,12 @@ Migration "create_products_table" {
   Description = "Create products table with categories"
   Up {
     CreateTable "categories" {
-      Column "id" {
+      Field "id" {
         type = "integer"
         primary_key = true
         auto_increment = true
       }
-      Column "name" {
+      Field "name" {
         type = "string"
         size = 100
         unique = true
@@ -224,25 +224,25 @@ Migration "create_products_table" {
     }
 
     CreateTable "products" {
-      Column "id" {
+      Field "id" {
         type = "integer"
         primary_key = true
         auto_increment = true
       }
-      Column "name" {
+      Field "name" {
         type = "string"
         size = 255
       }
-      Column "price" {
+      Field "price" {
         type = "decimal"
         size = 10
         scale = 2
       }
-      Column "category_id" {
+      Field "category_id" {
         type = "integer"
         foreign_key = {
           reference_table = "categories"
-          reference_column = "id"
+          reference_field = "id"
           on_delete = "CASCADE"
         }
       }
@@ -263,18 +263,18 @@ Migration "add_user_profile_fields" {
   Description = "Add profile fields to users table"
   Up {
     AlterTable "users" {
-      AddColumn {
+      AddField {
         name = "avatar_url"
         type = "string"
         size = 500
         nullable = true
       }
-      AddColumn {
+      AddField {
         name = "bio"
         type = "text"
         nullable = true
       }
-      AddColumn {
+      AddField {
         name = "is_verified"
         type = "boolean"
         default = false
@@ -283,9 +283,9 @@ Migration "add_user_profile_fields" {
   }
   Down {
     AlterTable "users" {
-      DropColumn { name = "avatar_url" }
-      DropColumn { name = "bio" }
-      DropColumn { name = "is_verified" }
+      DropField { name = "avatar_url" }
+      DropField { name = "bio" }
+      DropField { name = "is_verified" }
     }
   }
 }
@@ -474,17 +474,17 @@ Migration "1665678901_create_users_table" {
   Connection = "default"
   Up {
     CreateTable "users" {
-      Column "id" {
+      Field "id" {
         type = "integer"
         primary_key = true
         auto_increment = true
       }
-      Column "username" {
+      Field "username" {
         type = "string"
         size = 100
         unique = true
       }
-      # ...existing column definitions...
+      # ...existing field definitions...
     }
   }
   Down {

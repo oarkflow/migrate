@@ -9,9 +9,9 @@ type Dialect interface {
 	DropMaterializedViewSQL(dmv DropMaterializedView) (string, error)
 	DropTableSQL(dt DropTable) (string, error)
 	DropSchemaSQL(ds DropSchema) (string, error)
-	AddColumnSQL(ac AddColumn, tableName string) ([]string, error)
-	DropColumnSQL(dc DropColumn, tableName string) (string, error)
-	RenameColumnSQL(rc RenameColumn, tableName string) (string, error)
+	AddFieldSQL(ac AddField, tableName string) ([]string, error)
+	DropFieldSQL(dc DropField, tableName string) (string, error)
+	RenameFieldSQL(rc RenameField, tableName string) (string, error)
 	MapDataType(genericType string, size, scale int, autoIncrement bool) string
 	CreateViewSQL(cv CreateView) (string, error)
 	DropViewSQL(dv DropView) (string, error)
@@ -27,7 +27,7 @@ type Dialect interface {
 	RenameTriggerSQL(rt RenameTrigger) (string, error)
 	WrapInTransaction(queries []string) []string
 	WrapInTransactionWithConfig(queries []string, trans Transaction) []string
-	InsertSQL(table string, columns []string, values []any) (string, map[string]any, error)
+	InsertSQL(table string, fields []string, values []any) (string, map[string]any, error)
 	TableExistsSQL(table string) string
 	EOS() string
 }

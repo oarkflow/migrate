@@ -52,9 +52,9 @@ type MigrationChange struct {
 	Date            time.Time
 	Operation       string
 	Details         string // Now just raw details, not HTML
-	Column          *AddColumn
-	DropColumn      *DropColumn
-	RenameColumn    *RenameColumn
+	Field           *AddField
+	DropField       *DropField
+	RenameField     *RenameField
 	CreateTable     *CreateTable
 	CreateView      *CreateView
 	CreateFunction  *CreateFunction
@@ -185,10 +185,10 @@ func extractTimeFromFilename(fname string) time.Time {
 	return time.Time{}
 }
 
-func sortColumnsPriority(cols []AddColumn) []AddColumn {
-	// Columns with PrimaryKey or AutoIncrement come first, preserving their original order
-	var pri []AddColumn
-	var rest []AddColumn
+func sortFieldsPriority(cols []AddField) []AddField {
+	// AddFields with PrimaryKey or AutoIncrement come first, preserving their original order
+	var pri []AddField
+	var rest []AddField
 	for _, c := range cols {
 		if c.PrimaryKey || c.AutoIncrement {
 			pri = append(pri, c)
@@ -199,11 +199,11 @@ func sortColumnsPriority(cols []AddColumn) []AddColumn {
 	return append(pri, rest...)
 }
 
-func describeTableColumns(cols []AddColumn, pk []string) string {
-	cols = sortColumnsPriority(cols)
+func describeTableFields(cols []AddField, pk []string) string {
+	cols = sortFieldsPriority(cols)
 	var lines []string
 	for _, c := range cols {
-		lines = append(lines, describeColumn(c))
+		lines = append(lines, describeField(c))
 	}
 	if len(pk) > 0 {
 		lines = append(lines, fmt.Sprintf("<b>Primary Key:</b> %s", strings.Join(pk, ", ")))
@@ -211,7 +211,7 @@ func describeTableColumns(cols []AddColumn, pk []string) string {
 	return "<ul><li>" + strings.Join(lines, "</li><li>") + "</li></ul>"
 }
 
-func describeColumn(c AddColumn) string {
+func describeField(c AddField) string {
 	return fmt.Sprintf(
 		"<b>%s</b> <code>%s</code>%s%s%s%s%s%s%s",
 		c.Name,
@@ -325,9 +325,9 @@ func generateHTMLReportAllObjectsTemplate(
 			// TABLES
 			for _, ct := range m.Up.CreateTable {
 				if strings.EqualFold(ct.Name, obj.Name) {
-					// Sort columns for CreateTable in history
+					// Sort fields for CreateTable in history
 					sortedCT := ct
-					sortedCT.Columns = sortColumnsPriority(sortedCT.Columns)
+					sortedCT.AddFields = sortFieldsPriority(sortedCT.AddFields)
 					changes = append(changes, MigrationChange{
 						MigrationName: m.Name,
 						Date:          createdAt,
@@ -342,47 +342,47 @@ func generateHTMLReportAllObjectsTemplate(
 			}
 			for _, at := range m.Up.AlterTable {
 				if strings.EqualFold(at.Name, obj.Name) && finalTable != nil && !dropped {
-					for _, ac := range at.AddColumn {
+					for _, ac := range at.AddFields {
 						changes = append(changes, MigrationChange{
 							MigrationName: m.Name,
 							Date:          createdAt,
-							Operation:     "AddColumn",
+							Operation:     "AddField",
 							Details:       "",
-							Column:        &ac,
+							Field:         &ac,
 						})
-						finalTable.Columns = append(finalTable.Columns, ac)
-						finalTable.Columns = sortColumnsPriority(finalTable.Columns)
+						finalTable.AddFields = append(finalTable.AddFields, ac)
+						finalTable.AddFields = sortFieldsPriority(finalTable.AddFields)
 					}
-					for _, dc := range at.DropColumn {
+					for _, dc := range at.DropFields {
 						changes = append(changes, MigrationChange{
 							MigrationName: m.Name,
 							Date:          createdAt,
-							Operation:     "DropColumn",
+							Operation:     "DropField",
 							Details:       "",
-							DropColumn:    &dc,
+							DropField:     &dc,
 						})
-						var newCols []AddColumn
-						for _, col := range finalTable.Columns {
+						var newCols []AddField
+						for _, col := range finalTable.AddFields {
 							if col.Name != dc.Name {
 								newCols = append(newCols, col)
 							}
 						}
-						finalTable.Columns = sortColumnsPriority(newCols)
+						finalTable.AddFields = sortFieldsPriority(newCols)
 					}
-					for _, rc := range at.RenameColumn {
+					for _, rc := range at.RenameFields {
 						changes = append(changes, MigrationChange{
 							MigrationName: m.Name,
 							Date:          createdAt,
-							Operation:     "RenameColumn",
+							Operation:     "RenameField",
 							Details:       "",
-							RenameColumn:  &rc,
+							RenameField:   &rc,
 						})
-						for i, col := range finalTable.Columns {
+						for i, col := range finalTable.AddFields {
 							if col.Name == rc.From {
-								finalTable.Columns[i].Name = rc.To
+								finalTable.AddFields[i].Name = rc.To
 							}
 						}
-						finalTable.Columns = sortColumnsPriority(finalTable.Columns)
+						finalTable.AddFields = sortFieldsPriority(finalTable.AddFields)
 					}
 				}
 			}
@@ -430,7 +430,7 @@ func generateHTMLReportAllObjectsTemplate(
 						Date:          createdAt,
 						Operation:     "RenameView",
 						Details:       "",
-						RenameColumn:  nil, // Not used for views
+						RenameField:   nil, // Not used for views
 					})
 					if finalView != nil {
 						finalView.Name = rv.NewName
@@ -586,29 +586,29 @@ func generateHTMLReportAllObjectsTemplate(
 						tableState = &cpy
 						droppedState = false
 					}
-				case "AddColumn":
-					if tableState != nil && ch.Column != nil {
-						tableState.Columns = append(tableState.Columns, *ch.Column)
-						tableState.Columns = sortColumnsPriority(tableState.Columns)
+				case "AddField":
+					if tableState != nil && ch.Field != nil {
+						tableState.AddFields = append(tableState.AddFields, *ch.Field)
+						tableState.AddFields = sortFieldsPriority(tableState.AddFields)
 					}
-				case "DropColumn":
-					if tableState != nil && ch.DropColumn != nil {
-						var newCols []AddColumn
-						for _, col := range tableState.Columns {
-							if col.Name != ch.DropColumn.Name {
+				case "DropField":
+					if tableState != nil && ch.DropField != nil {
+						var newCols []AddField
+						for _, col := range tableState.AddFields {
+							if col.Name != ch.DropField.Name {
 								newCols = append(newCols, col)
 							}
 						}
-						tableState.Columns = sortColumnsPriority(newCols)
+						tableState.AddFields = sortFieldsPriority(newCols)
 					}
-				case "RenameColumn":
-					if tableState != nil && ch.RenameColumn != nil {
-						for i, col := range tableState.Columns {
-							if col.Name == ch.RenameColumn.From {
-								tableState.Columns[i].Name = ch.RenameColumn.To
+				case "RenameField":
+					if tableState != nil && ch.RenameField != nil {
+						for i, col := range tableState.AddFields {
+							if col.Name == ch.RenameField.From {
+								tableState.AddFields[i].Name = ch.RenameField.To
 							}
 						}
-						tableState.Columns = sortColumnsPriority(tableState.Columns)
+						tableState.AddFields = sortFieldsPriority(tableState.AddFields)
 					}
 				case "DropTable":
 					tableState = nil
@@ -925,8 +925,8 @@ func generateFallbackHTMLReport(allObjects []objectInfo, reports map[string]Obje
 		// Structure panel
 		if report.Type == "table" {
 			if report.FinalTable != nil && !report.Dropped {
-				structure += `<table class="min-w-full border border-gray-200 mb-2 text-xs"><thead><tr><th class="border px-2 py-1 bg-gray-100">Column</th><th class="border px-2 py-1 bg-gray-100">Type</th><th class="border px-2 py-1 bg-gray-100">Flags</th></tr></thead><tbody>`
-				for _, col := range report.FinalTable.Columns {
+				structure += `<table class="min-w-full border border-gray-200 mb-2 text-xs"><thead><tr><th class="border px-2 py-1 bg-gray-100">Field</th><th class="border px-2 py-1 bg-gray-100">Type</th><th class="border px-2 py-1 bg-gray-100">Flags</th></tr></thead><tbody>`
+				for _, col := range report.FinalTable.AddFields {
 					flags := ""
 					if col.PrimaryKey {
 						flags += `<span class="bg-green-600 text-white px-1 py-0.5 rounded text-2xs mr-1">PK</span>`
@@ -956,17 +956,17 @@ func generateFallbackHTMLReport(allObjects []objectInfo, reports map[string]Obje
 			for _, action := range group.Actions {
 				history += `<div class="mb-2"><span class="font-medium text-blue-600">` + action.Operation + `</span> `
 				switch action.Operation {
-				case "AddColumn":
-					if action.Column != nil {
-						history += `<b>` + action.Column.Name + `</b> <code>` + action.Column.Type + `</code>`
+				case "AddField":
+					if action.Field != nil {
+						history += `<b>` + action.Field.Name + `</b> <code>` + action.Field.Type + `</code>`
 					}
-				case "DropColumn":
-					if action.DropColumn != nil {
-						history += `Dropped column: <b>` + action.DropColumn.Name + `</b>`
+				case "DropField":
+					if action.DropField != nil {
+						history += `Dropped field: <b>` + action.DropField.Name + `</b>`
 					}
-				case "RenameColumn":
-					if action.RenameColumn != nil {
-						history += `Renamed column: <b>` + action.RenameColumn.From + `</b> to <b>` + action.RenameColumn.To + `</b>`
+				case "RenameField":
+					if action.RenameField != nil {
+						history += `Renamed field: <b>` + action.RenameField.From + `</b> to <b>` + action.RenameField.To + `</b>`
 					}
 				case "CreateTable":
 					if action.CreateTable != nil {
@@ -1033,8 +1033,8 @@ func generateTableHTML(table *CreateTable) string {
 		return "<b>Object does not exist (dropped).</b>"
 	}
 	var b strings.Builder
-	b.WriteString(`<table class="min-w-full border border-gray-200 mb-2 text-xs"><thead><tr><th class="border px-2 py-1 bg-gray-100">Column</th><th class="border px-2 py-1 bg-gray-100">Type</th><th class="border px-2 py-1 bg-gray-100">Flags</th></tr></thead><tbody>`)
-	for _, col := range table.Columns {
+	b.WriteString(`<table class="min-w-full border border-gray-200 mb-2 text-xs"><thead><tr><th class="border px-2 py-1 bg-gray-100">Field</th><th class="border px-2 py-1 bg-gray-100">Type</th><th class="border px-2 py-1 bg-gray-100">Flags</th></tr></thead><tbody>`)
+	for _, col := range table.AddFields {
 		flags := ""
 		if col.PrimaryKey {
 			flags += `<span class="bg-green-600 text-white px-1 py-0.5 rounded text-2xs mr-1">PK</span>`

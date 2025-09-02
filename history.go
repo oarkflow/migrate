@@ -118,7 +118,7 @@ func SetupMigrationHistoryTable(dialect string, db *squealx.DB, table string) er
 	dial := GetDialect(dialect)
 	stmt := CreateTable{
 		Name: table,
-		Columns: []AddColumn{
+		AddFields: []AddField{
 			{Name: "id", Type: "number", PrimaryKey: true, AutoIncrement: true, Unique: true, Index: true},
 			{Name: "name", Type: "string", Index: true, Size: 200},
 			{Name: "version", Type: "string", Size: 10},
