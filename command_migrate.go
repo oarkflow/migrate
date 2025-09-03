@@ -140,9 +140,9 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 					Table: ct.Name,
 					Rows:  seedRows,
 				}
-				for _, col := range ct.Columns {
+				for _, col := range ct.AddFields {
 					if err := requireFields(col.Name); err != nil {
-						return fmt.Errorf("MigrateCommand.Handle (seed column): %w", err)
+						return fmt.Errorf("MigrateCommand.Handle (seed field): %w", err)
 					}
 					if col.AutoIncrement || col.Nullable {
 						continue

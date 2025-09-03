@@ -26,7 +26,7 @@ func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", p.quoteIdentifier(ct.Name)))
 		var cols []string
 		var pkCols []string
-		for _, col := range ct.Columns {
+		for _, col := range ct.AddFields {
 			colDef := fmt.Sprintf("%s %s", p.quoteIdentifier(col.Name), p.MapDataType(col.Type, col.Size, col.Scale, col.AutoIncrement))
 			if !col.Nullable {
 				colDef += " NOT NULL"
@@ -62,7 +62,7 @@ func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error
 		sb.WriteString(strings.Join(cols, ", "))
 		sb.WriteString(");")
 		var extra []string
-		for _, col := range ct.Columns {
+		for _, col := range ct.AddFields {
 			if col.Unique {
 				extra = append(extra, fmt.Sprintf("CREATE UNIQUE INDEX uniq_%s_%s ON %s (%s);", ct.Name, col.Name, p.quoteIdentifier(ct.Name), p.quoteIdentifier(col.Name)))
 			} else if col.Index {
@@ -133,9 +133,9 @@ func (p *PostgresDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 	return fmt.Sprintf("DROP SCHEMA%s %s%s;", exists, p.quoteIdentifier(ds.Name), cascade), nil
 }
 
-func (p *PostgresDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, error) {
+func (p *PostgresDialect) AddFieldSQL(ac AddField, tableName string) ([]string, error) {
 	if err := requireFields(ac.Name, tableName); err != nil {
-		return nil, fmt.Errorf("PostgresDialect.AddColumnSQL: %w", err)
+		return nil, fmt.Errorf("PostgresDialect.AddFieldSQL: %w", err)
 	}
 	var queries []string
 	var sb strings.Builder
@@ -167,7 +167,7 @@ func (p *PostgresDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string
 	}
 	if ac.ForeignKey != nil {
 		fk := ac.ForeignKey
-		sql := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT fk_%s FOREIGN KEY (%s) REFERENCES %s(%s)", tableName, ac.Name, ac.Name, fk.ReferenceTable, fk.ReferenceColumn)
+		sql := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT fk_%s FOREIGN KEY (%s) REFERENCES %s(%s)", tableName, ac.Name, ac.Name, fk.ReferenceTable, fk.ReferenceField)
 		if fk.OnDelete != "" {
 			sql += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
 		}
@@ -179,26 +179,26 @@ func (p *PostgresDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string
 	return queries, nil
 }
 
-func (p *PostgresDialect) DropColumnSQL(dc DropColumn, tableName string) (string, error) {
+func (p *PostgresDialect) DropFieldSQL(dc DropField, tableName string) (string, error) {
 	if err := requireFields(dc.Name, tableName); err != nil {
-		return "", fmt.Errorf("PostgresDialect.DropColumnSQL: %w", err)
+		return "", fmt.Errorf("PostgresDialect.DropFieldSQL: %w", err)
 	}
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(dc.Name)), nil
 }
 
-func (p *PostgresDialect) RenameColumnSQL(rc RenameColumn, tableName string) (string, error) {
+func (p *PostgresDialect) RenameFieldSQL(rc RenameField, tableName string) (string, error) {
 	if err := requireFields(tableName); err != nil {
-		return "", fmt.Errorf("PostgresDialect.RenameColumnSQL: %w", err)
+		return "", fmt.Errorf("PostgresDialect.RenameFieldSQL: %w", err)
 	}
 	from := rc.From
 	if from == "" && rc.Name != "" {
 		from = rc.Name
 	}
 	if from == "" {
-		return "", errors.New("postgres requires column name for renaming column")
+		return "", errors.New("postgres requires field name for renaming field")
 	}
 	if rc.To == "" {
-		return "", errors.New("postgres requires new column name for renaming column")
+		return "", errors.New("postgres requires new field name for renaming field")
 	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(from), p.quoteIdentifier(rc.To)), nil
 }
@@ -320,11 +320,11 @@ func IsInteger(s string) bool {
 	return err == nil
 }
 
-func (p *PostgresDialect) InsertSQL(table string, columns []string, values []any) (string, map[string]any, error) {
+func (p *PostgresDialect) InsertSQL(table string, fields []string, values []any) (string, map[string]any, error) {
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string
-	for i, col := range columns {
+	for i, col := range fields {
 		quotedCols = append(quotedCols, p.quoteIdentifier(col))
 		paramName := ":" + col
 		namedParams = append(namedParams, paramName)

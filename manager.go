@@ -642,48 +642,48 @@ func (d *Manager) CreateMigrationFile(name string) error {
 					table = strings.Join(tokens[2:], "_")
 				}
 				template = fmt.Sprintf(`Migration "%s" {
-  Version = "1.0.0"
-  Description = "Create table %s."
-  Connection = "default"
-  Up {
-    CreateTable "%s" {
-      Column "id" {
-        type = "integer"
-        primary_key = true
-        auto_increment = true
-        index = true
-        unique = true
-      }
-      Column "is_active" {
-        type = "boolean"
-        default = false
-      }
-      Column "status" {
-        type = "string"
-        size = 20
-        default = "active"
-      }
-      Column "created_at" {
-        type = "datetime"
-        default = "now()"
-      }
-      Column "updated_at" {
-        type = "datetime"
-        default = "now()"
-      }
-      Column "deleted_at" {
-        type = "datetime"
-        nullable = true
-      }
-    }
-  }
-  Down {
-    DropTable "%s" {
-      Cascade = true
-    }
-  }
-}
-`, name, table, table, table)
+			Version = "1.0.0"
+			Description = "Create table %s."
+			Connection = "default"
+			Up {
+				 CreateTable "%s" {
+				   Field "id" {
+				     type = "integer"
+				     primary_key = true
+				     auto_increment = true
+				     index = true
+				     unique = true
+				   }
+				   Field "is_active" {
+				     type = "boolean"
+				     default = false
+				   }
+				   Field "status" {
+				     type = "string"
+				     size = 20
+				     default = "active"
+				   }
+				   Field "created_at" {
+				     type = "datetime"
+				     default = "now()"
+				   }
+				   Field "updated_at" {
+				     type = "datetime"
+				     default = "now()"
+				   }
+				   Field "deleted_at" {
+				     type = "datetime"
+				     nullable = true
+				   }
+				 }
+			}
+			Down {
+				 DropTable "%s" {
+				   Cascade = true
+				 }
+			}
+	}
+	`, name, table, table, table)
 			}
 		case "alter":
 			switch objType {

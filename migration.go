@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/oarkflow/migrate/drivers"
 	"github.com/oarkflow/squealx"
+
+	"github.com/oarkflow/migrate/drivers"
 )
 
 const (
@@ -61,29 +62,29 @@ type Operation struct {
 }
 
 type AlterTable struct {
-	Name         string         `json:"name"`
-	AddColumn    []AddColumn    `json:"AddColumn"`
-	DropColumn   []DropColumn   `json:"DropColumn"`
-	RenameColumn []RenameColumn `json:"RenameColumn"`
+	Name         string        `json:"name"`
+	AddFields    []AddField    `json:"AddField"`
+	DropFields   []DropField   `json:"DropField"`
+	RenameFields []RenameField `json:"RenameField"`
 }
 
 type CreateTable struct {
-	Name       string      `json:"name"`
-	Columns    []AddColumn `json:"Column"`
-	PrimaryKey []string    `json:"PrimaryKey,omitempty"`
+	Name       string     `json:"name"`
+	AddFields  []AddField `json:"Field"`
+	PrimaryKey []string   `json:"PrimaryKey,omitempty"`
 }
 
 func (ct CreateTable) ToSQL(dialect string, up bool) (string, error) {
 	if err := requireFields(ct.Name); err != nil {
 		return "", fmt.Errorf("CreateTable: %w", err)
 	}
-	if len(ct.Columns) == 0 {
+	if len(ct.AddFields) == 0 {
 		return "", fmt.Errorf("CreateTable requires at least one column")
 	}
 	return GetDialect(dialect).CreateTableSQL(ct, up)
 }
 
-type AddColumn struct {
+type AddField struct {
 	Name          string      `json:"name"`
 	Type          string      `json:"type"`
 	Nullable      bool        `json:"nullable"`
@@ -99,35 +100,35 @@ type AddColumn struct {
 }
 
 type ForeignKey struct {
-	ReferenceTable  string `json:"reference_table"`
-	ReferenceColumn string `json:"reference_column"`
-	OnDelete        string `json:"on_delete,omitempty"`
-	OnUpdate        string `json:"on_update,omitempty"`
+	ReferenceTable string `json:"reference_table"`
+	ReferenceField string `json:"reference_field"`
+	OnDelete       string `json:"on_delete,omitempty"`
+	OnUpdate       string `json:"on_update,omitempty"`
 }
 
-type DropColumn struct {
+type DropField struct {
 	Name string `json:"name"`
 }
 
-func (d DropColumn) ToSQL(dialect, tableName string) (string, error) {
+func (d DropField) ToSQL(dialect, tableName string) (string, error) {
 	if err := requireFields(tableName, d.Name); err != nil {
-		return "", fmt.Errorf("DropColumn: %w", err)
+		return "", fmt.Errorf("DropField: %w", err)
 	}
-	return GetDialect(dialect).DropColumnSQL(d, tableName)
+	return GetDialect(dialect).DropFieldSQL(d, tableName)
 }
 
-type RenameColumn struct {
+type RenameField struct {
 	Name string `json:"name"`
 	From string `json:"from"`
 	To   string `json:"to"`
 	Type string `json:"type,omitempty"`
 }
 
-func (r RenameColumn) ToSQL(dialect, tableName string) (string, error) {
+func (r RenameField) ToSQL(dialect, tableName string) (string, error) {
 	if err := requireFields(tableName, r.From, r.To); err != nil {
-		return "", fmt.Errorf("RenameColumn: %w", err)
+		return "", fmt.Errorf("RenameField: %w", err)
 	}
-	return GetDialect(dialect).RenameColumnSQL(r, tableName)
+	return GetDialect(dialect).RenameFieldSQL(r, tableName)
 }
 
 type RenameTable struct {
@@ -228,11 +229,11 @@ type Validation struct {
 	PostUpChecks []string `json:"PostUpChecks"`
 }
 
-func (a AddColumn) ToSQL(dialect, tableName string) ([]string, error) {
+func (a AddField) ToSQL(dialect, tableName string) ([]string, error) {
 	if err := requireFields(tableName); err != nil {
-		return nil, fmt.Errorf("AddColumn: %w", err)
+		return nil, fmt.Errorf("AddField: %w", err)
 	}
-	return GetDialect(dialect).AddColumnSQL(a, tableName)
+	return GetDialect(dialect).AddFieldSQL(a, tableName)
 }
 
 type CreateView struct {
@@ -398,16 +399,16 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 	newSchema := CreateTable{
 		Name:       origSchema.Name,
 		PrimaryKey: make([]string, len(origSchema.PrimaryKey)),
-		Columns:    make([]AddColumn, len(origSchema.Columns)),
+		AddFields:  make([]AddField, len(origSchema.AddFields)),
 	}
 	copy(newSchema.PrimaryKey, origSchema.PrimaryKey)
-	copy(newSchema.Columns, origSchema.Columns)
+	copy(newSchema.AddFields, origSchema.AddFields)
 	renameMap := make(map[string]string)
-	if len(at.DropColumn) > 0 || len(at.RenameColumn) > 0 {
-		for _, dropCol := range at.DropColumn {
+	if len(at.DropFields) > 0 || len(at.RenameFields) > 0 {
+		for _, dropCol := range at.DropFields {
 			found := false
-			var newCols []AddColumn
-			for _, col := range newSchema.Columns {
+			var newCols []AddField
+			for _, col := range newSchema.AddFields {
 				if col.Name == dropCol.Name {
 					found = true
 					continue
@@ -415,9 +416,9 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 				newCols = append(newCols, col)
 			}
 			if !found {
-				return nil, fmt.Errorf("column %s not found in table %s for dropping", dropCol.Name, at.Name)
+				return nil, fmt.Errorf("field %s not found in table %s for dropping", dropCol.Name, at.Name)
 			}
-			newSchema.Columns = newCols
+			newSchema.AddFields = newCols
 			var newPK []string
 			for _, pk := range newSchema.PrimaryKey {
 				if pk != dropCol.Name {
@@ -426,18 +427,18 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 			}
 			newSchema.PrimaryKey = newPK
 		}
-		for _, renameCol := range at.RenameColumn {
+		for _, renameCol := range at.RenameFields {
 			found := false
-			for i, col := range newSchema.Columns {
+			for i, col := range newSchema.AddFields {
 				if col.Name == renameCol.From {
-					newSchema.Columns[i].Name = renameCol.To
+					newSchema.AddFields[i].Name = renameCol.To
 					found = true
 					renameMap[renameCol.From] = renameCol.To
 					break
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("column %s not found in table %s for renaming", renameCol.From, at.Name)
+				return nil, fmt.Errorf("field %s not found in table %s for renaming", renameCol.From, at.Name)
 			}
 			for i, pk := range newSchema.PrimaryKey {
 				if pk == renameCol.From {
@@ -454,13 +455,13 @@ func handleSQLiteAlterTable(at AlterTable) ([]string, error) {
 		return queries, nil
 	}
 	var queries []string
-	for _, addCol := range at.AddColumn {
+	for _, addCol := range at.AddFields {
 		qList, err := addCol.ToSQL(DialectSQLite, at.Name)
 		if err != nil {
 			return nil, err
 		}
 		queries = append(queries, qList...)
-		newSchema.Columns = append(newSchema.Columns, addCol)
+		newSchema.AddFields = append(newSchema.AddFields, addCol)
 		if addCol.PrimaryKey {
 			newSchema.PrimaryKey = append(newSchema.PrimaryKey, addCol.Name)
 		}
@@ -494,23 +495,23 @@ func (at AlterTable) ToSQL(dialect string) ([]string, error) {
 		return handleSQLiteAlterTable(at)
 	}
 	var queries []string
-	for _, addCol := range at.AddColumn {
+	for _, addCol := range at.AddFields {
 		qList, err := addCol.ToSQL(dialect, at.Name)
 		if err != nil {
-			return nil, fmt.Errorf("error in AddColumn: %w", err)
+			return nil, fmt.Errorf("error in AddField: %w", err)
 		}
 		if len(qList) > 0 {
 			queries = append(queries, qList...)
 		}
 	}
 	var err error
-	queries, err = ParseQueriesWithTable(queries, dialect, at.Name, at.DropColumn...)
+	queries, err = ParseQueriesWithTable(queries, dialect, at.Name, at.DropFields...)
 	if err != nil {
-		return nil, fmt.Errorf("error in DropColumn: %w", err)
+		return nil, fmt.Errorf("error in DropField: %w", err)
 	}
-	queries, err = ParseQueriesWithTable(queries, dialect, at.Name, at.RenameColumn...)
+	queries, err = ParseQueriesWithTable(queries, dialect, at.Name, at.RenameFields...)
 	if err != nil {
-		return nil, fmt.Errorf("error in RenameColumn: %w", err)
+		return nil, fmt.Errorf("error in RenameField: %w", err)
 	}
 	return queries, nil
 }
@@ -553,10 +554,10 @@ func (op Operation) ToSQL(dialect string) ([]string, error) {
 			cpy := CreateTable{
 				Name:       ct.Name,
 				PrimaryKey: make([]string, len(ct.PrimaryKey)),
-				Columns:    make([]AddColumn, len(ct.Columns)),
+				AddFields:  make([]AddField, len(ct.AddFields)),
 			}
 			copy(cpy.PrimaryKey, ct.PrimaryKey)
-			copy(cpy.Columns, ct.Columns)
+			copy(cpy.AddFields, ct.AddFields)
 			tableSchemas[ct.Name] = &cpy
 			schemaMutex.Unlock()
 		}

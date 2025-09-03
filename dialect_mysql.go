@@ -25,7 +25,7 @@ func (m *MySQLDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", m.quoteIdentifier(ct.Name)))
 		var cols []string
 		var pkCols []string
-		for _, col := range ct.Columns {
+		for _, col := range ct.AddFields {
 			colDef := fmt.Sprintf("%s %s", m.quoteIdentifier(col.Name), m.MapDataType(col.Type, col.Size, col.Scale, col.AutoIncrement))
 			if col.AutoIncrement {
 				colDef += " AUTO_INCREMENT"
@@ -63,7 +63,7 @@ func (m *MySQLDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
 		sb.WriteString(strings.Join(cols, ", "))
 		sb.WriteString(");")
 		var extra []string
-		for _, col := range ct.Columns {
+		for _, col := range ct.AddFields {
 			if col.Unique {
 				extra = append(extra, fmt.Sprintf("CREATE UNIQUE INDEX uniq_%s_%s ON %s (%s);", ct.Name, col.Name, m.quoteIdentifier(ct.Name), m.quoteIdentifier(col.Name)))
 			} else if col.Index {
@@ -109,9 +109,9 @@ func (m *MySQLDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 	return "", errors.New("DROP SCHEMA is not supported in MySQL")
 }
 
-func (m *MySQLDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, error) {
+func (m *MySQLDialect) AddFieldSQL(ac AddField, tableName string) ([]string, error) {
 	if err := requireFields(ac.Name, tableName); err != nil {
-		return nil, fmt.Errorf("MySQLDialect.AddColumnSQL: %w", err)
+		return nil, fmt.Errorf("MySQLDialect.AddFieldSQL: %w", err)
 	}
 	var queries []string
 	var sb strings.Builder
@@ -146,7 +146,7 @@ func (m *MySQLDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, e
 	}
 	if ac.ForeignKey != nil {
 		fk := ac.ForeignKey
-		sql := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT fk_%s FOREIGN KEY (%s) REFERENCES %s(%s)", tableName, ac.Name, ac.Name, fk.ReferenceTable, fk.ReferenceColumn)
+		sql := fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT fk_%s FOREIGN KEY (%s) REFERENCES %s(%s)", tableName, ac.Name, ac.Name, fk.ReferenceTable, fk.ReferenceField)
 		if fk.OnDelete != "" {
 			sql += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
 		}
@@ -158,29 +158,29 @@ func (m *MySQLDialect) AddColumnSQL(ac AddColumn, tableName string) ([]string, e
 	return queries, nil
 }
 
-func (m *MySQLDialect) DropColumnSQL(dc DropColumn, tableName string) (string, error) {
+func (m *MySQLDialect) DropFieldSQL(dc DropField, tableName string) (string, error) {
 	if err := requireFields(dc.Name, tableName); err != nil {
-		return "", fmt.Errorf("MySQLDialect.DropColumnSQL: %w", err)
+		return "", fmt.Errorf("MySQLDialect.DropFieldSQL: %w", err)
 	}
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", m.quoteIdentifier(tableName), m.quoteIdentifier(dc.Name)), nil
 }
 
-func (m *MySQLDialect) RenameColumnSQL(rc RenameColumn, tableName string) (string, error) {
+func (m *MySQLDialect) RenameFieldSQL(rc RenameField, tableName string) (string, error) {
 	if err := requireFields(tableName); err != nil {
-		return "", fmt.Errorf("MySQLDialect.RenameColumnSQL: %w", err)
+		return "", fmt.Errorf("MySQLDialect.RenameFieldSQL: %w", err)
 	}
 	if rc.Type == "" {
-		return "", errors.New("MySQL requires column type for renaming column")
+		return "", errors.New("MySQL requires field type for renaming field")
 	}
 	from := rc.From
 	if from == "" && rc.Name != "" {
 		from = rc.Name
 	}
 	if from == "" {
-		return "", errors.New("MySQL requires column name for renaming column")
+		return "", errors.New("MySQL requires field name for renaming field")
 	}
 	if rc.To == "" {
-		return "", errors.New("MySQL requires new column name for renaming column")
+		return "", errors.New("MySQL requires new field name for renaming field")
 	}
 	return fmt.Sprintf("ALTER TABLE %s CHANGE %s %s %s;", m.quoteIdentifier(tableName), m.quoteIdentifier(from), m.quoteIdentifier(rc.To), rc.Type), nil
 }
@@ -267,11 +267,11 @@ func (m *MySQLDialect) RenameTriggerSQL(rt RenameTrigger) (string, error) {
 	return "", errors.New("RENAME TRIGGER is not supported in this MySQL dialect implementation")
 }
 
-func (m *MySQLDialect) InsertSQL(table string, columns []string, values []any) (string, map[string]any, error) {
+func (m *MySQLDialect) InsertSQL(table string, fields []string, values []any) (string, map[string]any, error) {
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string
-	for i, col := range columns {
+	for i, col := range fields {
 		quotedCols = append(quotedCols, m.quoteIdentifier(col))
 		paramName := ":" + col
 		namedParams = append(namedParams, paramName)
