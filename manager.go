@@ -296,7 +296,24 @@ func (d *Manager) ApplyMigration(m Migration) error {
 	if err := requireFields(migration.Name); err != nil {
 		return fmt.Errorf("ApplyMigration: %w", err)
 	}
-	queries, err := migration.ToSQL(d.dialect, true)
+	dialect := d.dialect
+	var dbDriver IDatabaseDriver = d.dbDriver
+	if migration.Driver != "" {
+		normalizedDriver, err := NormalizeDriver(migration.Driver)
+		if err != nil {
+			return fmt.Errorf("invalid driver in migration %s: %w", migration.Name, err)
+		}
+		dialect = normalizedDriver
+		if migration.Connection != "" {
+			dbDriver, err = NewDriver(normalizedDriver, migration.Connection)
+			if err != nil {
+				return fmt.Errorf("failed to create driver for migration %s: %w", migration.Name, err)
+			}
+		} else {
+			return fmt.Errorf("migration %s has Driver set but no Connection", migration.Name)
+		}
+	}
+	queries, err := migration.ToSQL(dialect, true)
 	if err != nil {
 		return fmt.Errorf("failed to generate SQL: %w", err)
 	}
@@ -318,7 +335,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 			return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
 		}
 	}
-	if err := d.dbDriver.ApplySQL(queries); err != nil {
+	if err := dbDriver.ApplySQL(queries); err != nil {
 		return fmt.Errorf("failed to apply migration %s: %w", m.Name, err)
 	}
 	for _, val := range migration.Validate {
@@ -408,7 +425,24 @@ func (d *Manager) RollbackMigration(step int) error {
 			logger.Warn().Msgf("Migration '%s' is disabled, skipping rollback.", migration.Name)
 			continue
 		}
-		downQueries, err := migration.ToSQL(d.dialect, false)
+		dialect := d.dialect
+		var dbDriver IDatabaseDriver = d.dbDriver
+		if migration.Driver != "" {
+			normalizedDriver, err := NormalizeDriver(migration.Driver)
+			if err != nil {
+				return fmt.Errorf("invalid driver in migration %s: %w", migration.Name, err)
+			}
+			dialect = normalizedDriver
+			if migration.Connection != "" {
+				dbDriver, err = NewDriver(normalizedDriver, migration.Connection)
+				if err != nil {
+					return fmt.Errorf("failed to create driver for migration %s: %w", migration.Name, err)
+				}
+			} else {
+				return fmt.Errorf("migration %s has Driver set but no Connection", migration.Name)
+			}
+		}
+		downQueries, err := migration.ToSQL(dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
 		}
@@ -418,7 +452,7 @@ func (d *Manager) RollbackMigration(step int) error {
 				logger.Info().Msg(q)
 			}
 		}
-		if err := d.dbDriver.ApplySQL(downQueries); err != nil {
+		if err := dbDriver.ApplySQL(downQueries); err != nil {
 			return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
@@ -480,11 +514,28 @@ func (d *Manager) ResetMigrations() error {
 			logger.Warn().Msgf("Migration '%s' is disabled, skipping reset.", migration.Name)
 			continue
 		}
-		downQueries, err := migration.ToSQL(d.dialect, false)
+		dialect := d.dialect
+		var dbDriver IDatabaseDriver = d.dbDriver
+		if migration.Driver != "" {
+			normalizedDriver, err := NormalizeDriver(migration.Driver)
+			if err != nil {
+				return fmt.Errorf("invalid driver in migration %s: %w", migration.Name, err)
+			}
+			dialect = normalizedDriver
+			if migration.Connection != "" {
+				dbDriver, err = NewDriver(normalizedDriver, migration.Connection)
+				if err != nil {
+					return fmt.Errorf("failed to create driver for migration %s: %w", migration.Name, err)
+				}
+			} else {
+				return fmt.Errorf("migration %s has Driver set but no Connection", migration.Name)
+			}
+		}
+		downQueries, err := migration.ToSQL(dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
 		}
-		if err := d.dbDriver.ApplySQL(downQueries); err != nil {
+		if err := dbDriver.ApplySQL(downQueries); err != nil {
 			return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 		}
 		logger.Info().Msg("Rolled back migration: " + name)

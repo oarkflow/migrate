@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/oarkflow/squealx"
@@ -30,6 +31,7 @@ type Migration struct {
 	Version     string        `json:"Version"`
 	Description string        `json:"Description"`
 	Connection  string        `json:"Connection"`
+	Driver      string        `json:"Driver"`
 	Up          Operation     `json:"Up"`
 	Down        Operation     `json:"Down"`
 	Transaction []Transaction `json:"Transaction"`
@@ -685,6 +687,19 @@ func RunSeeds(seed SeedDefinition, dialect string, dbDriver IDatabaseDriver) err
 func computeChecksum(data []byte) string {
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
+}
+
+func NormalizeDriver(driver string) (string, error) {
+	switch strings.ToLower(driver) {
+	case "pgx5", "pg", "postgres", "postgresql":
+		return "postgres", nil
+	case "mariadb", "mysql", "aurora":
+		return "mysql", nil
+	case "sqlite", "sqlite3":
+		return "sqlite", nil
+	default:
+		return "", fmt.Errorf("unsupported driver: %s", driver)
+	}
 }
 
 func NewDriver(driver string, dsn string) (IDatabaseDriver, error) {
