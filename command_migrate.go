@@ -115,6 +115,10 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		if err := requireFields(migration.Name); err != nil {
 			return fmt.Errorf("MigrateCommand.Handle: %w", err)
 		}
+		if migration.Disable {
+			logger.Warn().Msgf("Migration '%s' is disabled. To enable it, set Disabled: false or remove the Disabled field.", migration.Name)
+			continue
+		}
 		for _, val := range migration.Validate {
 			if err := runPreUpChecks(val.PreUpChecks); err != nil {
 				return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)

@@ -34,6 +34,7 @@ type Migration struct {
 	Down        Operation     `json:"Down"`
 	Transaction []Transaction `json:"Transaction"`
 	Validate    []Validation  `json:"Validate"`
+	Disable     bool          `json:"Disable,omitempty"`
 }
 
 type Operation struct {

@@ -237,6 +237,10 @@ func (d *Manager) ApplyMigration(m Migration) error {
 	if err := requireFields(m.Name); err != nil {
 		return fmt.Errorf("ApplyMigration: invalid migration name: %w", err)
 	}
+	if m.Disable {
+		logger.Warn().Msgf("Migration '%s' is disabled and will not be applied.", m.Name)
+		return nil
+	}
 
 	// The migration file may be nested, so search for the file by name
 	var migrationPath string
@@ -400,6 +404,10 @@ func (d *Manager) RollbackMigration(step int) error {
 		if err := requireFields(migration.Name); err != nil {
 			return fmt.Errorf("RollbackMigration: %w", err)
 		}
+		if migration.Disable {
+			logger.Warn().Msgf("Migration '%s' is disabled, skipping rollback.", migration.Name)
+			continue
+		}
 		downQueries, err := migration.ToSQL(d.dialect, false)
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
@@ -467,6 +475,10 @@ func (d *Manager) ResetMigrations() error {
 		migration := cfg.Migration
 		if err := requireFields(migration.Name); err != nil {
 			return fmt.Errorf("ResetMigrations: %w", err)
+		}
+		if migration.Disable {
+			logger.Warn().Msgf("Migration '%s' is disabled, skipping reset.", migration.Name)
+			continue
 		}
 		downQueries, err := migration.ToSQL(d.dialect, false)
 		if err != nil {
