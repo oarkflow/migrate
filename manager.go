@@ -43,9 +43,9 @@ type IManager interface {
 	ResetMigrations() error
 	ValidateMigrations() error
 	CreateMigrationFile(name string) error
-	CreateSeedFile(name string) error
+	CreateSeedFile(name string, raw bool) error
 	ValidateHistoryStorage() error
-	RunSeeds(truncate bool, seedFile ...string) error
+	RunSeeds(truncate bool, includeRaw bool, seedFile ...string) error
 }
 
 type Manager struct {
@@ -594,11 +594,17 @@ func (d *Manager) ValidateMigrations() error {
 	return nil
 }
 
-func (d *Manager) CreateSeedFile(name string) error {
+func (d *Manager) CreateSeedFile(name string, raw bool) error {
 	tableName := strings.TrimSuffix(strings.TrimPrefix(name, "seed_"), ".bcl")
 	name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
-	filename := filepath.Join(d.seedDir, name+".bcl")
-	template := fmt.Sprintf(`Seed "%s" {
+	var filename string
+	var template string
+	if raw {
+		filename = filepath.Join(d.seedDir, name+".sql")
+		template = fmt.Sprintf("-- Raw seed for table %s\n-- Add your INSERT statements below.\n-- Example:\n-- INSERT INTO %s (id, name) VALUES (1, 'example');\n", tableName, tableName)
+	} else {
+		filename = filepath.Join(d.seedDir, name+".bcl")
+		template = fmt.Sprintf(`Seed "%s" {
     table = "%s"
     Field "id" {
         value = "fake_uuid"
@@ -609,6 +615,7 @@ func (d *Manager) CreateSeedFile(name string) error {
     }
 	rows = 2
 }`, name, tableName)
+	}
 	if err := os.WriteFile(filename, []byte(template), 0644); err != nil {
 		return fmt.Errorf("failed to create seed file: %w", err)
 	}
@@ -954,7 +961,7 @@ func runPostUpChecks(checks []string) error {
 	return nil
 }
 
-func (d *Manager) RunSeeds(truncate bool, seedFiles ...string) error {
+func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) error {
 	if d.dbDriver == nil {
 		return fmt.Errorf("no database driver configured for seeding")
 	}
@@ -965,58 +972,85 @@ func (d *Manager) RunSeeds(truncate bool, seedFiles ...string) error {
 	}
 
 	for _, seedFile := range seedFiles {
-		// Validate seed file path
 		if seedFile == "" {
 			logger.Warn().Msg("Empty seed file path, skipping")
 			continue
 		}
 
-		data, err := os.ReadFile(seedFile)
-		if err != nil {
-			return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
-		}
-
-		var cfg SeedConfig
-		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("failed to unmarshal seed file '%s': %w", seedFile, err)
-		}
-
-		// Validate seed configuration
-		if err := requireFields(cfg.Seed.Name, cfg.Seed.Table); err != nil {
-			return fmt.Errorf("invalid seed configuration in '%s': %w", seedFile, err)
-		}
-
-		queries, err := cfg.Seed.ToSQL(d.dialect)
-		if err != nil {
-			return fmt.Errorf("failed to generate seed SQL for '%s': %w", seedFile, err)
-		}
-
-		if len(queries) == 0 {
-			logger.Info().Msgf("Seed file '%s' generated no queries, skipping", seedFile)
-			continue
-		}
-		if truncate {
-			query := getTruncateSQL(d.dialect, cfg.Seed.Table)
-			if query != "" {
-				logger.Info().Msgf("Truncating table: %s", cfg.Seed.Table)
-				if d.Verbose {
-					logger.Info().Msgf("Truncate SQL: %s", query)
-				}
-				err := d.dbDriver.ApplySQL([]string{query})
-				if err != nil {
-					return fmt.Errorf("failed to truncate table %s: %w", cfg.Seed.Table, err)
-				}
-			} else {
-				return fmt.Errorf("unsupported dialect for truncation: %s", d.dialect)
+		ext := strings.ToLower(filepath.Ext(seedFile))
+		switch ext {
+		case ".sql":
+			if !includeRaw {
+				logger.Info().Msgf("Skipping raw seed file (enable with --include-raw): %s", seedFile)
+				continue
 			}
-		}
-		logger.Info().Msgf("Seeding table: %s", cfg.Seed.Table)
-		for _, q := range queries {
-			logger.Info().Msgf("Seed SQL: %s", q.SQL)
-			err := d.dbDriver.ApplySQL([]string{q.SQL}, q.Args)
+			data, err := os.ReadFile(seedFile)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
 			}
+			sql := strings.TrimSpace(string(data))
+			if sql == "" {
+				logger.Info().Msgf("Raw seed file '%s' is empty, skipping", seedFile)
+				continue
+			}
+			if d.Verbose {
+				logger.Info().Msgf("Raw seed SQL (%d bytes): %s", len(sql), sql)
+			}
+			if truncate {
+				logger.Warn().Msgf("Truncate flag ignored for raw seed file: %s", seedFile)
+			}
+			logger.Info().Msgf("Applying raw seed file: %s", seedFile)
+			if err := d.dbDriver.ApplySQL([]string{sql}); err != nil {
+				return fmt.Errorf("failed to apply raw seed '%s': %w", seedFile, err)
+			}
+		case ".bcl":
+			data, err := os.ReadFile(seedFile)
+			if err != nil {
+				return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
+			}
+
+			var cfg SeedConfig
+			if _, err := bcl.Unmarshal(data, &cfg); err != nil {
+				return fmt.Errorf("failed to unmarshal seed file '%s': %w", seedFile, err)
+			}
+
+			if err := requireFields(cfg.Seed.Name, cfg.Seed.Table); err != nil {
+				return fmt.Errorf("invalid seed configuration in '%s': %w", seedFile, err)
+			}
+
+			queries, err := cfg.Seed.ToSQL(d.dialect)
+			if err != nil {
+				return fmt.Errorf("failed to generate seed SQL for '%s': %w", seedFile, err)
+			}
+
+			if len(queries) == 0 {
+				logger.Info().Msgf("Seed file '%s' generated no queries, skipping", seedFile)
+				continue
+			}
+			if truncate {
+				query := getTruncateSQL(d.dialect, cfg.Seed.Table)
+				if query != "" {
+					logger.Info().Msgf("Truncating table: %s", cfg.Seed.Table)
+					if d.Verbose {
+						logger.Info().Msgf("Truncate SQL: %s", query)
+					}
+					if err := d.dbDriver.ApplySQL([]string{query}); err != nil {
+						return fmt.Errorf("failed to truncate table %s: %w", cfg.Seed.Table, err)
+					}
+				} else {
+					return fmt.Errorf("unsupported dialect for truncation: %s", d.dialect)
+				}
+			}
+			logger.Info().Msgf("Seeding table: %s", cfg.Seed.Table)
+			for _, q := range queries {
+				logger.Info().Msgf("Seed SQL: %s", q.SQL)
+				if err := d.dbDriver.ApplySQL([]string{q.SQL}, q.Args); err != nil {
+					logger.Error().Msgf("Seed failed (%s): %v", seedFile, err)
+					return fmt.Errorf("failed to apply seed '%s': %w", seedFile, err)
+				}
+			}
+		default:
+			logger.Warn().Msgf("Unsupported seed file type, skipping: %s", seedFile)
 		}
 	}
 	return nil

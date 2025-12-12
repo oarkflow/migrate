@@ -2,7 +2,7 @@ package migrate
 
 import (
 	"errors"
-	
+
 	"github.com/oarkflow/cli/contracts"
 )
 
@@ -27,6 +27,12 @@ func (c *MakeSeedCommand) Extend() contracts.Extend {
 				Usage:   "Enable verbose output",
 				Value:   "false",
 			},
+			{
+				Name:    "raw",
+				Aliases: []string{"r"},
+				Usage:   "Create raw SQL seed file",
+				Value:   "false",
+			},
 		},
 	}
 }
@@ -36,5 +42,7 @@ func (c *MakeSeedCommand) Handle(ctx contracts.Context) error {
 	if name == "" {
 		return errors.New("seed name is required")
 	}
-	return c.Driver.CreateSeedFile(name)
+	rawOption := ctx.Option("raw")
+	raw := rawOption == "true" || rawOption == "1"
+	return c.Driver.CreateSeedFile(name, raw)
 }
