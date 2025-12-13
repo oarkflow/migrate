@@ -536,6 +536,7 @@ Command:
 $ go run main.go cli migrate --seed=true --rows=10
 ```
 This runs all pending migrations and seeds tables with 10 rows each.
+To additionally execute raw `.sql` seed files located in your seed directory, append `--include-raw=true` to the command.
 
 ### Run Seeds
 Command:

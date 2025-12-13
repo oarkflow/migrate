@@ -45,6 +45,12 @@ func (c *MigrateCommand) Extend() contracts.Extend {
 				Usage:   "Number of seed rows (default 10)",
 				Value:   "10",
 			},
+			{
+				Name:    "include-raw",
+				Aliases: []string{"i"},
+				Usage:   "Include raw .sql seed files after migration",
+				Value:   "false",
+			},
 		},
 	}
 }
@@ -99,6 +105,8 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			seedRows = n
 		}
 	}
+	includeRawOption := ctx.Option("include-raw")
+	includeRaw := includeRawOption == "true" || includeRawOption == "1"
 	shouldSeed := seedFlag == "true" || seedFlag == "1"
 
 	for _, path := range migrationFiles {
@@ -208,6 +216,48 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 				}
 			}
 		}
+	}
+	if shouldSeed {
+		if err := c.runSeedFilesAfterMigration(includeRaw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
+	seedDir := c.Driver.SeedDir()
+	if seedDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(seedDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read seed directory %s: %w", seedDir, err)
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		switch ext {
+		case ".bcl":
+			files = append(files, filepath.Join(seedDir, entry.Name()))
+		case ".sql":
+			if includeRaw {
+				files = append(files, filepath.Join(seedDir, entry.Name()))
+			}
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	logger.Info().Msgf("Running %d seed file(s) after migration", len(files))
+	if err := c.Driver.RunSeeds(false, includeRaw, files...); err != nil {
+		return fmt.Errorf("failed to apply seed files after migration: %w", err)
 	}
 	return nil
 }
