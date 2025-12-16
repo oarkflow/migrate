@@ -57,6 +57,10 @@ type Manager struct {
 	historyDriver HistoryDriver
 	Verbose       bool
 	command       []contracts.Command
+	// assets holds an optional embedded filesystem (using //go:embed from the
+	// application that embeds migrations/seeds/templates). When set, file
+	// reads and directory walks will prefer this FS over the OS filesystem.
+	assets fs.FS
 }
 
 type ManagerOption func(*Manager)
@@ -121,6 +125,15 @@ func WithConfig(config *MigrateConfig) ManagerOption {
 				}
 			}
 		}
+	}
+}
+
+// WithEmbeddedFiles supplies an embedded filesystem (fs.FS) to the manager.
+// Use this when building a single binary with migrations embedded using
+// //go:embed in the application.
+func WithEmbeddedFiles(assets fs.FS) ManagerOption {
+	return func(m *Manager) {
+		m.assets = assets
 	}
 }
 
@@ -232,6 +245,107 @@ func (d *Manager) ValidateHistoryStorage() error {
 	return d.historyDriver.ValidateStorage()
 }
 
+// readFile reads a file either from the embedded assets FS (if present) or the
+// OS filesystem otherwise.
+func (d *Manager) readFile(path string) ([]byte, error) {
+	if d.assets != nil {
+		return fs.ReadFile(d.assets, path)
+	}
+	return os.ReadFile(path)
+}
+
+// ListMigrationMap returns a map of migration name -> path. When using an
+// embedded filesystem the returned paths are the paths inside the embedded FS.
+func (d *Manager) ListMigrationMap() (map[string]string, error) {
+	migrationMap := make(map[string]string)
+	seedDir := d.SeedDir()
+	if d.assets != nil {
+		err := fs.WalkDir(d.assets, d.migrationDir, func(p string, de fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if de.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(de.Name(), ".bcl") {
+				// Skip seeds
+				if seedDir != "" && strings.HasPrefix(p, seedDir) {
+					return nil
+				}
+				name := strings.TrimSuffix(de.Name(), ".bcl")
+				migrationMap[name] = p
+			}
+			return nil
+		})
+		return migrationMap, err
+	}
+	// Fallback to OS filesystem walking
+	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if seedDir != "" && strings.HasPrefix(path, seedDir) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+			name := strings.TrimSuffix(info.Name(), ".bcl")
+			migrationMap[name] = path
+		}
+		return nil
+	})
+	return migrationMap, err
+}
+
+// ListSeedFiles returns seed files (.bcl and optionally .sql) inside the
+// configured seed directory. The returned paths are either OS paths or paths
+// inside the embedded FS depending on configuration.
+func (d *Manager) ListSeedFiles(includeRaw bool) ([]string, error) {
+	var files []string
+	if d.assets != nil {
+		err := fs.WalkDir(d.assets, d.seedDir, func(p string, de fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if de.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(de.Name()))
+			switch ext {
+			case ".bcl":
+				files = append(files, p)
+			case ".sql":
+				if includeRaw {
+					files = append(files, p)
+				}
+			}
+			return nil
+		})
+		return files, err
+	}
+	osFiles, err := os.ReadDir(d.SeedDir())
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range osFiles {
+		if file.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(file.Name()))
+		switch ext {
+		case ".bcl":
+			files = append(files, filepath.Join(d.SeedDir(), file.Name()))
+		case ".sql":
+			if includeRaw {
+				files = append(files, filepath.Join(d.SeedDir(), file.Name()))
+			}
+		}
+	}
+	return files, nil
+}
+
 func (d *Manager) ApplyMigration(m Migration) error {
 	// Validate migration name
 	if err := requireFields(m.Name); err != nil {
@@ -242,30 +356,16 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		return nil
 	}
 
-	// The migration file may be nested, so search for the file by name
-	var migrationPath string
-	seedDir := d.SeedDir()
-	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// Skip SeedDir and its subdirectories
-		if seedDir != "" && strings.HasPrefix(path, seedDir) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") && strings.TrimSuffix(info.Name(), ".bcl") == m.Name {
-			migrationPath = path
-			return fmt.Errorf("found") // break walk
-		}
-		return nil
-	})
-	if migrationPath == "" {
+	// Build map of migrations and look up by name (supports embedded FS)
+	migrationMap, err := d.ListMigrationMap()
+	if err != nil {
+		return fmt.Errorf("failed to list migrations: %w", err)
+	}
+	migrationPath, ok := migrationMap[m.Name]
+	if !ok {
 		return fmt.Errorf("migration file for '%s' not found in '%s'", m.Name, d.migrationDir)
 	}
-	data, err := os.ReadFile(migrationPath)
+	data, err := d.readFile(migrationPath)
 	if err != nil {
 		return fmt.Errorf("failed to read migration file %s: %w", migrationPath, err)
 	}
@@ -379,28 +479,9 @@ func (d *Manager) RollbackMigration(step int) error {
 		logger.Info().Msgf("Requested rollback steps (%d) exceeds total applied migrations (%d), rolling back all", step, total)
 		step = total
 	}
-	// Build a map of migration name to path for all .bcl files
-	migrationMap := make(map[string]string)
-	seedDir := d.SeedDir()
-	err = filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// Skip SeedDir and its subdirectories
-		if seedDir != "" && strings.HasPrefix(path, seedDir) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-			name := strings.TrimSuffix(info.Name(), ".bcl")
-			migrationMap[name] = path
-		}
-		return nil
-	})
+	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
-		return fmt.Errorf("failed to walk migration directory: %w", err)
+		return fmt.Errorf("failed to list migration files: %w", err)
 	}
 	for i := 0; i < step; i++ {
 		last := histories[len(histories)-1]
@@ -409,7 +490,7 @@ func (d *Manager) RollbackMigration(step int) error {
 		if !ok {
 			return fmt.Errorf("migration file for %s not found", name)
 		}
-		data, err := os.ReadFile(path)
+		data, err := d.readFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s for rollback: %w", name, err)
 		}
@@ -469,28 +550,9 @@ func (d *Manager) ResetMigrations() error {
 		return err
 	}
 
-	// Build a map of migration name to path for all .bcl files
-	migrationMap := make(map[string]string)
-	seedDir := d.SeedDir()
-	err = filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// Skip SeedDir and its subdirectories
-		if seedDir != "" && strings.HasPrefix(path, seedDir) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-			name := strings.TrimSuffix(info.Name(), ".bcl")
-			migrationMap[name] = path
-		}
-		return nil
-	})
+	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
-		return fmt.Errorf("failed to walk migration directory: %w", err)
+		return fmt.Errorf("failed to list migration files: %w", err)
 	}
 	for i := len(histories) - 1; i >= 0; i-- {
 		name := histories[i].Name
@@ -498,7 +560,7 @@ func (d *Manager) ResetMigrations() error {
 		if !ok {
 			return fmt.Errorf("migration file for %s not found", name)
 		}
-		data, err := os.ReadFile(path)
+		data, err := d.readFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s for rollback: %w", name, err)
 		}
@@ -548,27 +610,13 @@ func (d *Manager) ResetMigrations() error {
 }
 
 func (d *Manager) ValidateMigrations() error {
-	// Recursively find all .bcl migration files
-	var migrationFiles []string
-	seedDir := d.SeedDir()
-	err := filepath.Walk(d.migrationDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// Skip SeedDir and its subdirectories
-		if seedDir != "" && strings.HasPrefix(path, seedDir) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-			migrationFiles = append(migrationFiles, path)
-		}
-		return nil
-	})
+	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
-		return fmt.Errorf("failed to walk migration directory: %w", err)
+		return fmt.Errorf("failed to list migration files: %w", err)
+	}
+	var migrationFiles []string
+	for _, p := range migrationMap {
+		migrationFiles = append(migrationFiles, p)
 	}
 	histories, err := d.historyDriver.Load()
 	if err != nil {
@@ -984,7 +1032,7 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 				logger.Info().Msgf("Skipping raw seed file (enable with --include-raw): %s", seedFile)
 				continue
 			}
-			data, err := os.ReadFile(seedFile)
+			data, err := d.readFile(seedFile)
 			if err != nil {
 				return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
 			}
@@ -1004,7 +1052,7 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 				return fmt.Errorf("failed to apply raw seed '%s': %w", seedFile, err)
 			}
 		case ".bcl":
-			data, err := os.ReadFile(seedFile)
+			data, err := d.readFile(seedFile)
 			if err != nil {
 				return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
 			}

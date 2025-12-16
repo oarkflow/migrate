@@ -114,6 +114,22 @@ Migration "1234567890_create_users_table" {
 go run main.go cli migrate
 ```
 
+### Embedding Migrations into a Single Binary ✅
+
+You can embed `migrations/`, `migrations/seeds/` and `templates/` into your Go binary using `//go:embed` and run migrations directly from the binary without shipping files:
+
+```go
+//go:embed migrations/** migrations/seeds/** templates/**
+var assets embed.FS
+
+mgr := migrate.NewManager(migrate.WithEmbeddedFiles(assets))
+mgr.Run()
+```
+
+When `WithEmbeddedFiles` is used the tool will list and read migrations from the embedded filesystem.
+
+> **Note:** Embedded assets are read-only at runtime. Creating new migration or seed files will write to the local filesystem and will not update the embedded assets inside the compiled binary.
+
 ## 📋 CLI Commands
 
 ### Migration Commands

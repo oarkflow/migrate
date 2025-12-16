@@ -79,34 +79,47 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	objectName := ctx.Option("object")
 	serveFlag := ctx.Option("serve") == "true"
 
-	// Recursively find all .bcl migration files except those in SeedDir
+	// Recursively find all .bcl migration files except those in SeedDir.
 	var filePaths []string
-	seedDir := c.Driver.SeedDir()
-	err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
+	var readFile func(string) ([]byte, error)
+	if mgr, ok := c.Driver.(*Manager); ok {
+		migrationMap, err := mgr.ListMigrationMap()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to list migrations: %w", err)
 		}
-		// Skip SeedDir and its subdirectories
-		if seedDir != "" && strings.HasPrefix(path, seedDir) {
-			if info.IsDir() {
-				return filepath.SkipDir
+		for _, p := range migrationMap {
+			filePaths = append(filePaths, p)
+		}
+		readFile = mgr.readFile
+	} else {
+		seedDir := c.Driver.SeedDir()
+		err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			// Skip SeedDir and its subdirectories
+			if seedDir != "" && strings.HasPrefix(path, seedDir) {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+				filePaths = append(filePaths, path)
 			}
 			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to walk migration directory: %w", err)
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-			filePaths = append(filePaths, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to walk migration directory: %w", err)
+		readFile = os.ReadFile
 	}
 	// Sort by filename (timestamp prefix)
 	sort.Strings(filePaths)
 
 	objectSet := make(map[string]string)
 	for _, path := range filePaths {
-		data, err := os.ReadFile(path)
+		data, err := readFile(path)
 		if err != nil {
 			continue
 		}
@@ -147,7 +160,7 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 		allObjects = append(allObjects, objectInfo{Name: objectName, Type: typ})
 	}
 
-	report, err := generateHTMLReportAllObjectsTemplate(allObjects, filePaths, c.Driver.MigrationDir())
+	report, err := generateHTMLReportAllObjectsTemplate(allObjects, filePaths, c.Driver.MigrationDir(), readFile)
 	if err != nil {
 		return err
 	}
@@ -296,6 +309,7 @@ func generateHTMLReportAllObjectsTemplate(
 	allObjects []objectInfo,
 	filePaths []string,
 	migrationDir string,
+	readFile func(string) ([]byte, error),
 ) (string, error) {
 	reports := make(map[string]ObjectReport)
 	for _, obj := range allObjects {
@@ -311,7 +325,7 @@ func generateHTMLReportAllObjectsTemplate(
 		var migrationGroups []MigrationGroup
 
 		for _, path := range filePaths {
-			data, err := os.ReadFile(path)
+			data, err := readFile(path)
 			if err != nil {
 				continue
 			}

@@ -75,27 +75,40 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	if err := c.Driver.ValidateMigrations(); err != nil {
 		logger.Printf("Validation warning: %v", err)
 	}
-	// Recursively find all .bcl migration files except those in SeedDir
+	// Collect migration files (.bcl) - prefer Manager.ListMigrationMap when available
 	var migrationFiles []string
-	seedDir := c.Driver.SeedDir()
-	err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
+	var readFile func(string) ([]byte, error)
+	if mgr, ok := c.Driver.(*Manager); ok {
+		migrationMap, err := mgr.ListMigrationMap()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to list migrations: %w", err)
 		}
-		// Skip SeedDir and its subdirectories
-		if seedDir != "" && strings.HasPrefix(path, seedDir) {
-			if info.IsDir() {
-				return filepath.SkipDir
+		for _, p := range migrationMap {
+			migrationFiles = append(migrationFiles, p)
+		}
+		readFile = mgr.readFile
+	} else {
+		seedDir := c.Driver.SeedDir()
+		err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			// Skip SeedDir and its subdirectories
+			if seedDir != "" && strings.HasPrefix(path, seedDir) {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
+				migrationFiles = append(migrationFiles, path)
 			}
 			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to walk migration directory: %w", err)
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-			migrationFiles = append(migrationFiles, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to walk migration directory: %w", err)
+		readFile = os.ReadFile
 	}
 
 	seedFlag := ctx.Option("seed")
@@ -111,7 +124,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 
 	for _, path := range migrationFiles {
 		name := strings.TrimSuffix(filepath.Base(path), ".bcl")
-		data, err := os.ReadFile(path)
+		data, err := readFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", name, err)
 		}
@@ -230,25 +243,33 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
 	if seedDir == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(seedDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to read seed directory %s: %w", seedDir, err)
-	}
 	var files []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	if mgr, ok := c.Driver.(*Manager); ok {
+		mgrFiles, err := mgr.ListSeedFiles(includeRaw)
+		if err != nil {
+			return fmt.Errorf("failed to list seed files: %w", err)
 		}
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		switch ext {
-		case ".bcl":
-			files = append(files, filepath.Join(seedDir, entry.Name()))
-		case ".sql":
-			if includeRaw {
+		files = append(files, mgrFiles...)
+	} else {
+		entries, err := os.ReadDir(seedDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to read seed directory %s: %w", seedDir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			switch ext {
+			case ".bcl":
 				files = append(files, filepath.Join(seedDir, entry.Name()))
+			case ".sql":
+				if includeRaw {
+					files = append(files, filepath.Join(seedDir, entry.Name()))
+				}
 			}
 		}
 	}

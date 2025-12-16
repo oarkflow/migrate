@@ -8,7 +8,7 @@ import (
 	"github.com/oarkflow/migrate"
 )
 
-func main() {
+func mai1n() {
 	// Example 1: Using configuration file
 	fmt.Println("=== Example 1: Using Configuration File ===")
 	configExample()

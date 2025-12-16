@@ -102,18 +102,27 @@ func (c *SeedCommand) Handle(ctx contracts.Context) error {
 		}
 		files = append(files, seedFile)
 	} else {
-		osFiles, _ := os.ReadDir(c.Driver.SeedDir())
-		for _, file := range osFiles {
-			if file.IsDir() {
-				continue
+		// Prefer Manager.ListSeedFiles when available (it supports embedded FS)
+		if mgr, ok := c.Driver.(*Manager); ok {
+			mgrFiles, err := mgr.ListSeedFiles(includeRaw)
+			if err != nil {
+				return fmt.Errorf("failed to list seed files: %w", err)
 			}
-			ext := strings.ToLower(filepath.Ext(file.Name()))
-			switch ext {
-			case ".bcl":
-				files = append(files, filepath.Join(c.Driver.SeedDir(), file.Name()))
-			case ".sql":
-				if includeRaw {
+			files = append(files, mgrFiles...)
+		} else {
+			osFiles, _ := os.ReadDir(c.Driver.SeedDir())
+			for _, file := range osFiles {
+				if file.IsDir() {
+					continue
+				}
+				ext := strings.ToLower(filepath.Ext(file.Name()))
+				switch ext {
+				case ".bcl":
 					files = append(files, filepath.Join(c.Driver.SeedDir(), file.Name()))
+				case ".sql":
+					if includeRaw {
+						files = append(files, filepath.Join(c.Driver.SeedDir(), file.Name()))
+					}
 				}
 			}
 		}
