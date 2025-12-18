@@ -307,6 +307,610 @@ Migration "add_user_profile_fields" {
 }
 ```
 
+---
+
+## 🧭 Migration Syntax Reference ✅
+
+This section documents the full migration and seed structure, all fields, supported values and examples to help you write correct and validated migrations.
+
+### Migration block
+
+Top-level migration properties (inside `Migration "name" { ... }`):
+
+- `Version` (string) — semantic or arbitrary version identifier. Required.
+- `Description` (string) — short explanation of the migration. Required.
+- `Connection` (string) — optional named connection to use (if you manage multiple connections).
+- `Driver` (string) — optional driver override (e.g., `postgres`, `mysql`, `sqlite`).
+- `Disable` (bool) — set to `true` to skip applying this migration.
+- `Up` / `Down` (blocks) — an `Operation` block describing changes to apply and rollback respectively.
+- `Transaction` (array) — optional transaction metadata (e.g., `IsolationLevel`).
+- `Validate` (array) — optional pre/post checks (`PreUpChecks`, `PostUpChecks`).
+
+Example header:
+
+```bcl
+Migration "20250101_add_users" {
+  Version = "1.0.0"
+  Description = "Create the users table and seed initial data"
+  Connection = "default"
+  Driver = "postgres"
+  Up { /* operations */ }
+  Down { /* rollback */ }
+}
+```
+
+### Supported Operation types
+
+Inside `Up` / `Down` you can use the following operations (short description):
+
+- `CreateTable` — create a new table.
+- `AlterTable` — add/drop/rename fields on an existing table.
+- `DeleteData` — delete rows via a WHERE clause.
+- `DropEnumType` — remove an enum type (Postgres).
+- `DropRowPolicy` — remove row-level policy (Postgres).
+- `DropMaterializedView` — drop a materialized view (Postgres).
+- `DropTable` — drop a table (optionally cascade).
+- `DropSchema` — drop a schema.
+- `RenameTable` — rename a table.
+- `CreateView`, `DropView`, `RenameView` — view management.
+- `CreateFunction`, `DropFunction`, `RenameFunction` — function management.
+- `CreateProcedure`, `DropProcedure`, `RenameProcedure` — stored procs.
+- `CreateTrigger`, `DropTrigger`, `RenameTrigger` — triggers.
+
+> Tip: Not all operations are supported or meaningful on every database dialect. The tool maps generic types and operations to dialect-specific SQL.
+
+---
+
+### CreateTable
+
+`CreateTable "name" { Field ... PrimaryKey = [ ... ] }`
+
+- `Name` (string) — table name (required).
+- `Field` entries are `AddField` objects (see next section).
+- `PrimaryKey` (array of strings) — optional explicit primary-key columns. If omitted, any field with `primary_key = true` becomes part of primary key.
+
+Example using both `PrimaryKey` and field-level `primary_key`:
+
+```bcl
+CreateTable "accounts" {
+  Field "id" {
+    type = "integer"
+    primary_key = true
+    auto_increment = true
+  }
+
+  Field "tenant_id" {
+    type = "integer"
+    primary_key = true
+  }
+
+  PrimaryKey = ["id", "tenant_id"]
+}
+```
+
+---
+
+### AddField / Field attributes
+
+An `AddField` (written as `Field "colname" { ... }` or `AddField { ... }` inside `AlterTable`) supports the following attributes:
+
+- `name` / field label — the column name (required).
+- `type` (string) — generic type name, e.g. `string`, `integer`, `decimal`, `boolean`, `text`, `date`, `datetime`, `json`, `blob`, etc. See the `utils.ConvertType` mappings in code for dialect-specific translation.
+- `size` (int, optional) — used for `varchar`, `string`, `decimal` length (e.g., `size = 255`).
+- `scale` (int, optional) — used with `decimal`/`numeric` as precision scale.
+- `nullable` (bool) — whether the column allows NULL. Default: `false` (not-null) unless set to `true`.
+- `default` (any, optional) — default value. Common values: `now()` (mapped to `CURRENT_TIMESTAMP`), string values will be quoted automatically, `null` maps to `NULL`.
+- `check` (string, optional) — CHECK constraint expression, e.g. `"price > 0"`.
+- `auto_increment` (bool) — marks integer primary-like column as auto-increment (translated per dialect).
+- `primary_key` (bool) — include the column in the primary key when `PrimaryKey` is not set.
+- `unique` (bool) — create a unique index on the field.
+- `index` (bool) — create a regular index on the field.
+- `foreign_key` (object, optional) — nested foreign-key specification.
+
+Example usage — types, defaults and constraints:
+
+```bcl
+CreateTable "products" {
+  Field "sku" {
+    type = "string"
+    size = 64
+    unique = true
+  }
+
+  Field "price" {
+    type = "decimal"
+    size = 10
+    scale = 2
+    check = "price >= 0"
+    default = 0.00
+  }
+
+  Field "created_at" {
+    type = "datetime"
+    default = "now()"
+  }
+}
+```
+
+Notes on `default` handling:
+
+- Strings are quoted automatically when `type = "string"`.
+- `default = "now()"` becomes `CURRENT_TIMESTAMP` for supported dialects.
+- `default = null` or `default = NULL` becomes `NULL`.
+
+---
+
+### Foreign keys
+
+`foreign_key` is a nested object inside a `Field`/`AddField`:
+
+- `reference_table` (string) — referenced table name (required).
+- `reference_field` (string) — referenced column name (required).
+- `on_delete` (string, optional) — action on delete (e.g., `CASCADE`, `SET NULL`, `RESTRICT`).
+- `on_update` (string, optional) — action on update.
+
+Example:
+
+```bcl
+Field "category_id" {
+  type = "integer"
+  foreign_key = {
+    reference_table = "categories"
+    reference_field = "id"
+    on_delete = "CASCADE"
+  }
+}
+```
+
+---
+
+### AlterTable specifics
+
+`AlterTable "table" { AddField { ... } DropField { name = "..." } RenameField { from = "old" to = "new" } }`
+
+- `AddField` uses the same attributes as `Field` in `CreateTable`.
+- `DropField { name = "col" }` — drops the column.
+- `RenameField { from = "old", to = "new" }` — renames a column. For Postgres and MySQL it generates `ALTER TABLE ... RENAME COLUMN ... TO ...`.
+
+Example:
+
+```bcl
+AlterTable "users" {
+  AddField {
+    name = "is_verified"
+    type = "boolean"
+    default = false
+  }
+
+  RenameField {
+    from = "username"
+    to = "user_name"
+  }
+
+  DropField { name = "legacy_flag" }
+}
+```
+
+> Note: SQLite has limited ALTER support — the tool will recreate tables when necessary (see implementation notes in the code).
+
+---
+
+### DropTable / Cascade
+
+`DropTable "name" { Cascade = true }` — set `Cascade = true` to drop dependent objects (behavior depends on dialect).
+
+---
+
+### Transactions and Validation
+
+- Use `Transaction` entries to control transaction behavior (e.g., isolation level). On Postgres the tool emits `BEGIN TRANSACTION ISOLATION LEVEL <level>` when configured.
+- `Validate` entries allow you to specify `PreUpChecks` and `PostUpChecks` that the manager will evaluate before and after runs.
+
+---
+
+## 🌱 Seed Syntax Reference ✅
+
+Seed files follow a `Seed "name" { ... }` structure.
+
+Seed fields:
+
+- `name` — seed name identifier.
+- `table` — target table name (required).
+- `Field` — array of `FieldDefinition` objects (see below).
+- `rows` — number of rows to generate (default controlled by configuration if omitted).
+- `combine` — optional list of column names to combine into unique values (used by some fake generators).
+- `condition` — optional condition, e.g., `if_not_exists` or `if_exists`.
+
+FieldDefinition attributes:
+
+- `name` (string) — column name (required).
+- `value` (any) — literal value, faker token (e.g., `fake_email`) or expression using `expr:` prefix (e.g., `expr: age.value > 18 ? true : false`).
+- `unique` (bool) — attempt to ensure unique generated values for this field (generator will retry up to 100 times when necessary).
+- `random` (bool) — treat `value` as a random generator placeholder; `random` interacts with internal fake/value helpers.
+- `size` (int) — requested string size for fake generators.
+- `data_type` (string) — cast/convert to a typed value (e.g., `int`, `boolean`).
+
+Expressions and fake functions
+
+- `value = "fake_email"` — uses built-in fakers (see list below).
+- `value = "expr: <expression>"` — evaluated using the `expr` package; expressions can refer to other field values by `<field>.value`.
+
+Example:
+
+```bcl
+Seed "user_seed" {
+  table = "users"
+
+  Field "id" {
+    value = "fake_uuid"
+    unique = true
+  }
+
+  Field "email" {
+    value = "fake_email"
+    unique = true
+  }
+
+  Field "age" {
+    value = "fake_age"
+    data_type = "int"
+  }
+
+  Field "is_active" {
+    value = "expr: age.value > 18 ? true : false"
+    data_type = "boolean"
+  }
+
+  rows = 50
+  condition = "if_not_exists"
+}
+```
+
+Available fake functions include: `fake_uuid`, `fake_name`, `fake_email`, `fake_phone`, `fake_address`, `fake_company`, `fake_date`, `fake_datetime`, `fake_age`, `fake_bool`, `fake_string`, `fake_int`, `fake_float64`.
+
+---
+
+### Quick reference: common generic type mapping examples
+
+- `type = "string"`, `size = 100` → `VARCHAR(100)` on most dialects (default `VARCHAR(255)` if size omitted).
+- `type = "decimal"`, `size = 10`, `scale = 2` → `NUMERIC(10,2)` or dialect-equivalent.
+- `type = "integer"`, `auto_increment = true` → `SERIAL`/`BIGSERIAL` on Postgres or `AUTO_INCREMENT` on MySQL.
+
+---
+
+### Cheat-sheet: quick attribute reference 📋
+
+| Attribute | Type | Description | Example |
+|---|---:|---|---|
+| `name` | string | Table/column/seed identifier (required where noted) | `users` |
+| `type` | string | Generic data type; mapped per dialect (see `utils.ConvertType`) | `string`, `integer`, `decimal` |
+| `size` | int | Length/precision for strings or decimals | `size = 255` |
+| `scale` | int | Decimal scale/precision | `scale = 2` |
+| `nullable` | bool | Allow NULL (default: NOT NULL unless set true) | `nullable = true` |
+| `default` | any | Default value; `now()` → `CURRENT_TIMESTAMP`; strings auto-quoted for `type = "string"` | `default = "now()"` or `default = "guest"` |
+| `check` | string | SQL CHECK constraint expression | `check = "price > 0"` |
+| `auto_increment` | bool | Use DB auto-increment (map to SERIAL/AUTO_INCREMENT) | `auto_increment = true` |
+| `primary_key` / `PrimaryKey` | bool / array | Column-level PK or explicit `PrimaryKey = ["id"]` array | `primary_key = true` or `PrimaryKey = ["id"]` |
+| `unique` | bool | Create unique index on field | `unique = true` |
+| `index` | bool | Create non-unique index on field | `index = true` |
+| `foreign_key` | object | FK spec `{ reference_table, reference_field, on_delete, on_update }` | see example below |
+| `rows` (seed) | int | Number of rows to generate | `rows = 10` |
+| `value` (seed) | any | Literal, `fake_*` token, or `expr: <expression>` | `value = "fake_email"` or `value = "expr: age.value > 18 ? true : false"` |
+| `data_type` (seed) | string | Cast/convert seed cell to a type (`int`, `boolean`) | `data_type = "int"` |
+| `unique` (seed) | bool | Ensure generated values are unique (retries up to 100 attempts) | `unique = true` |
+| `random` (seed) | bool | Use random generation (special handling in seed generator) | `random = true` |
+
+---
+
+### Comprehensive example — demonstrates most features 🔧
+
+```bcl
+Migration "20251201_full_example" {
+  Version = "1.0.0"
+  Description = "Full example covering CreateTable, AlterTable, FK, constraints, transactions and validation"
+  Connection = "default"
+  Driver = "postgres"
+
+  Transaction {
+    Name = "init"
+    IsolationLevel = "SERIALIZABLE"
+  }
+
+  Validate {
+    Name = "basic_checks"
+    PostUpChecks = ["SELECT COUNT(*) FROM users" ]
+  }
+
+  Up {
+    CreateTable "users" {
+      Field "id" {
+        type = "integer"
+        primary_key = true
+        auto_increment = true
+      }
+
+      Field "username" {
+        type = "string"
+        size = 100
+        unique = true
+      }
+
+      Field "email" {
+        type = "string"
+        size = 255
+        unique = true
+        nullable = false
+      }
+
+      Field "age" {
+        type = "integer"
+        default = 18
+      }
+
+      Field "created_at" {
+        type = "datetime"
+        default = "now()"
+      }
+
+      Field "status" {
+        type = "string"
+        default = "active"
+        check = "status IN ('active','inactive','banned')"
+      }
+
+      PrimaryKey = ["id"]
+    }
+
+    CreateTable "profiles" {
+      Field "id" {
+        type = "integer"
+        primary_key = true
+        auto_increment = true
+      }
+
+      Field "user_id" {
+        type = "integer"
+        foreign_key = {
+          reference_table = "users"
+          reference_field = "id"
+          on_delete = "CASCADE"
+          on_update = "CASCADE"
+        }
+      }
+
+      Field "bio" {
+        type = "text"
+        nullable = true
+      }
+
+      Field "avatar_url" {
+        type = "string"
+        size = 500
+        nullable = true
+      }
+    }
+
+    AlterTable "users" {
+      AddField {
+        name = "phone"
+        type = "string"
+        size = 20
+        unique = true
+        nullable = true
+      }
+
+      RenameField {
+        from = "username"
+        to = "user_name"
+      }
+    }
+  }
+
+  Down {
+    DropTable "profiles" { Cascade = true }
+    AlterTable "users" {
+      DropField { name = "phone" }
+      RenameField { from = "user_name" to = "username" }
+    }
+    DropTable "users" { Cascade = true }
+  }
+}
+```
+
+### Seed example that demonstrates `fake_` tokens, `expr:` and unique handling 🌱
+
+```bcl
+Seed "full_user_seed" {
+  table = "users"
+
+  Field "id" {
+    value = "fake_uuid"
+    unique = true
+  }
+
+  Field "email" {
+    value = "fake_email"
+    unique = true
+  }
+
+  Field "user_name" {
+    value = "fake_name"
+    size = 50
+  }
+
+  Field "age" {
+    value = "fake_age"
+    data_type = "int"
+  }
+
+  Field "is_adult" {
+    value = "expr: age.value >= 18 ? true : false"
+    data_type = "boolean"
+  }
+
+  Field "ref_code" {
+    value = "random_ref_${ref(user_name)}"
+    random = true
+    unique = true
+  }
+
+  rows = 5
+  condition = "if_not_exists"
+}
+```
+
+Notes:
+- Seed `expr:` values can reference other fields using `<field>.value` (evaluation resolves dependencies automatically; expressions that refer to missing fields will error).
+- Seed `unique` attempts up to 100 retries to generate a unique value; if it cannot, an error is returned.
+- SQLite: when your `AlterTable` requires dropping or renaming columns, the tool recreates the table behind the scenes to preserve compatibility.
+
+---
+
+If you'd like, I can also add a compact checklist table that maps each attribute to the exact struct/JSON name used by the library (helpful when authoring BCL files programmatically). Below is that mapping for quick reference.
+
+---
+
+### Migration structure — full hierarchical mapping 🔍
+
+This mapping shows top-level migration attributes, the operation blocks you can use, and for each block the available fields and their corresponding Go struct / JSON tags. Use this when generating BCL programmatically or converting between JSON/BCL.
+
+---
+
+#### Migration (top-level)
+
+- Migration object (Go: `Migration`, JSON tags shown)
+  - `name` → `Migration.Name` (required)
+  - `Version` → `Migration.Version` (required)
+  - `Description` → `Migration.Description` (required)
+  - `Connection` → `Migration.Connection` (optional)
+  - `Driver` → `Migration.Driver` (optional)
+  - `Disable` → `Migration.Disable` (optional)
+  - `Transaction` → `Migration.Transaction` ([]Transaction)
+    - Transaction fields: `Name`, `IsolationLevel` (JSON: `IsolationLevel`), `Mode`
+  - `Validate` → `Migration.Validate` ([]Validation)
+    - Validation fields: `Name`, `PreUpChecks` (`[]string`), `PostUpChecks` (`[]string`)
+  - `Up` → `Migration.Up` (Operation)
+  - `Down` → `Migration.Down` (Operation)
+
+---
+
+#### Operation (Up / Down blocks)
+
+Operation (Go: `Operation`, JSON: `Up`/`Down`) contains arrays of operation blocks. Each operation maps to a specific struct:
+
+- `CreateTable` → `Operation.CreateTable` (`[]CreateTable`)
+- `AlterTable` → `Operation.AlterTable` (`[]AlterTable`)
+- `DeleteData` → `Operation.DeleteData` (`[]DeleteData`)
+- `DropEnumType` → `Operation.DropEnumType` (`[]DropEnumType`)
+- `DropRowPolicy` → `Operation.DropRowPolicy` (`[]DropRowPolicy`)
+- `DropMaterializedView` → `Operation.DropMaterializedView` (`[]DropMaterializedView`)
+- `DropTable` → `Operation.DropTable` (`[]DropTable`)
+- `DropSchema` → `Operation.DropSchema` (`[]DropSchema`)
+- `RenameTable` → `Operation.RenameTable` (`[]RenameTable`)
+- `CreateView` / `DropView` / `RenameView` → `CreateView` / `DropView` / `RenameView`
+- `CreateFunction` / `DropFunction` / `RenameFunction`
+- `CreateProcedure` / `DropProcedure` / `RenameProcedure`
+- `CreateTrigger` / `DropTrigger` / `RenameTrigger`
+
+---
+
+#### CreateTable block (`CreateTable` / `CreateTable` struct)
+
+- JSON: `CreateTable "<name>" { Field ... PrimaryKey = [...] }` maps to Go `CreateTable`:
+  - `Name` → `CreateTable.Name` (the block's label)
+  - `Field` → `CreateTable.AddFields` (array of `AddField`)
+  - `PrimaryKey` → `CreateTable.PrimaryKey` (`[]string`)
+
+AddField (field-level properties) — Go struct `AddField` / JSON keys shown:
+- `name` → `AddField.Name`
+- `type` → `AddField.Type`
+- `size` → `AddField.Size`
+- `scale` → `AddField.Scale`
+- `nullable` → `AddField.Nullable`
+- `default` → `AddField.Default` (any)
+- `check` → `AddField.Check`
+- `auto_increment` → `AddField.AutoIncrement`
+- `primary_key` → `AddField.PrimaryKey`
+- `unique` → `AddField.Unique`
+- `index` → `AddField.Index`
+- `foreign_key` → `AddField.ForeignKey` (object)
+  - `reference_table` → `ForeignKey.ReferenceTable`
+  - `reference_field` → `ForeignKey.ReferenceField`
+  - `on_delete` → `ForeignKey.OnDelete`
+  - `on_update` → `ForeignKey.OnUpdate`
+
+---
+
+#### AlterTable block (`AlterTable` / `AlterTable` struct)
+
+- JSON: `AlterTable "table" { AddField { ... } DropField { name = "..." } RenameField { from = "..." to = "..." } }`
+- Go struct `AlterTable` fields:
+  - `Name` → `AlterTable.Name`
+  - `AddFields` → `AlterTable.AddFields` (`[]AddField`) — same `AddField` attributes as above
+  - `DropFields` → `AlterTable.DropFields` (`[]DropField`)
+    - `DropField.Name` (JSON `name`)
+  - `RenameFields` → `AlterTable.RenameFields` (`[]RenameField`)
+    - `RenameField.Name` (optional), `RenameField.From`, `RenameField.To`, `RenameField.Type`
+
+Notes: SQLite special-case — renames/drops may trigger table recreation (see code)
+
+---
+
+#### DropTable / DropSchema / DropMaterializedView / DropFunction / DropProcedure / DropTrigger
+
+Common fields:
+- `name` → `{}.Name` (e.g., `DropTable.Name`)
+- `cascade` → `DropTable.Cascade` (bool)
+- `if_exists` → `*.IfExists` where supported
+
+Example: `DropTable "users" { Cascade = true }` maps to `DropTable{Name: "users", Cascade: true}`
+
+---
+
+#### RenameTable / RenameView / RenameFunction / RenameProcedure / RenameTrigger
+
+- Rename blocks carry `OldName` / `NewName` fields in Go (`OldName`, `NewName`) mapped from JSON `old_name` / `new_name`.
+
+---
+
+#### CreateView / CreateFunction / CreateProcedure / CreateTrigger
+
+- Common fields:
+  - `Name` (`name`) — object name
+  - `Definition` (`definition`) — raw SQL/DDL body
+  - `OrReplace` (`or_replace`) — optional boolean
+
+---
+
+#### DeleteData
+
+- JSON: `DeleteData { Name = "table", Where = "id > 100" }`
+- Maps to Go `DeleteData{Name, Where}`
+
+---
+
+#### Seed files (`Seed` / `SeedDefinition`)
+
+Seed top-level:
+- `name` → `SeedDefinition.Name`
+- `table` → `SeedDefinition.Table`
+- `Field` → `SeedDefinition.Fields` (`[]FieldDefinition`)
+- `rows` → `SeedDefinition.Rows`
+- `condition` → `SeedDefinition.Condition`
+- `combine` → `SeedDefinition.Combine` (`[]string`)
+
+FieldDefinition fields:
+- `name` → `FieldDefinition.Name`
+- `value` → `FieldDefinition.Value` (any) — supports `fake_*` tokens and `expr:` expressions
+- `unique` → `FieldDefinition.Unique`
+- `random` → `FieldDefinition.Random`
+- `size` → `FieldDefinition.Size`
+- `data_type` → `FieldDefinition.DataType`
+
+---
+
+If you'd like, I can also add a JSON/CSV export of this exact mapping under `examples/` so tools can consume it directly.
+
 ## 🌱 Seed Data
 
 ### Creating Seed Files
