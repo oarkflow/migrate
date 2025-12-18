@@ -612,6 +612,7 @@ func (d *Manager) ResetMigrations() error {
 func (d *Manager) ValidateMigrations() error {
 	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to list migration files")
 		return fmt.Errorf("failed to list migration files: %w", err)
 	}
 	var migrationFiles []string
@@ -620,6 +621,7 @@ func (d *Manager) ValidateMigrations() error {
 	}
 	histories, err := d.historyDriver.Load()
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to load migration history")
 		return err
 	}
 	applied := make(map[string]bool)
@@ -635,7 +637,7 @@ func (d *Manager) ValidateMigrations() error {
 	}
 	toApply := len(missing)
 	if toApply > 0 {
-		logger.Info().Msgf("Migration initiated for: %v migration(s)", toApply)
+		logger.Info().Msgf("Migration initiated for: %v migration(s): %v", toApply, missing)
 		return nil
 	}
 	logger.Info().Msg("Migrations are up to date.")

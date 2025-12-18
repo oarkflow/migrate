@@ -62,9 +62,11 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		mgr.Verbose = verbose
 	}
 	if err := c.Driver.ValidateHistoryStorage(); err != nil {
+		logger.Error().Err(err).Msg("History storage validation failed")
 		return fmt.Errorf("history storage validation failed: %w", err)
 	}
 	if err := acquireLock(); err != nil {
+		logger.Error().Err(err).Msg("Cannot start migration (failed to acquire lock)")
 		return fmt.Errorf("cannot start migration: %w", err)
 	}
 	defer func() {
@@ -81,6 +83,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	if mgr, ok := c.Driver.(*Manager); ok {
 		migrationMap, err := mgr.ListMigrationMap()
 		if err != nil {
+			logger.Error().Err(err).Msg("Failed to list migrations from manager")
 			return fmt.Errorf("failed to list migrations: %w", err)
 		}
 		for _, p := range migrationMap {
@@ -106,6 +109,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			return nil
 		})
 		if err != nil {
+			logger.Error().Err(err).Msgf("Failed to walk migration directory: %s", c.Driver.MigrationDir())
 			return fmt.Errorf("failed to walk migration directory: %w", err)
 		}
 		readFile = os.ReadFile
@@ -126,14 +130,17 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		name := strings.TrimSuffix(filepath.Base(path), ".bcl")
 		data, err := readFile(path)
 		if err != nil {
+			logger.Error().Err(err).Msgf("Failed to read migration file %s from path %s", name, path)
 			return fmt.Errorf("failed to read migration file %s: %w", name, err)
 		}
 		var cfg Config
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
+			logger.Error().Err(err).Msgf("Failed to unmarshal migration file %s", name)
 			return fmt.Errorf("failed to unmarshal migration file %s: %w", name, err)
 		}
 		migration := cfg.Migration
 		if err := requireFields(migration.Name); err != nil {
+			logger.Error().Err(err).Msgf("Migration %s failed required field check", name)
 			return fmt.Errorf("MigrateCommand.Handle: %w", err)
 		}
 		if migration.Disable {
@@ -142,6 +149,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		}
 		for _, val := range migration.Validate {
 			if err := runPreUpChecks(val.PreUpChecks); err != nil {
+				logger.Error().Err(err).Msgf("Pre-up validation failed for migration %s", migration.Name)
 				return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
 			}
 		}
@@ -151,6 +159,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		}
 		for _, val := range migration.Validate {
 			if err := runPostUpChecks(val.PostUpChecks); err != nil {
+				logger.Error().Err(err).Msgf("Post-up validation failed for migration %s", migration.Name)
 				return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
 			}
 		}
@@ -158,6 +167,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		if shouldSeed {
 			for _, ct := range migration.Up.CreateTable {
 				if err := requireFields(ct.Name); err != nil {
+					logger.Error().Err(err).Msgf("Seed generation: missing required table name in migration %s", name)
 					return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
 				}
 				seedDef := SeedDefinition{
@@ -167,6 +177,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 				}
 				for _, col := range ct.AddFields {
 					if err := requireFields(col.Name); err != nil {
+						logger.Error().Err(err).Msgf("Seed generation: missing required field name in table %s (migration %s)", ct.Name, name)
 						return fmt.Errorf("MigrateCommand.Handle (seed field): %w", err)
 					}
 					if col.AutoIncrement || col.Nullable {
@@ -224,6 +235,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 					logger.Info().Msgf("Seed SQL: %s", q.SQL)
 					err := c.Driver.(*Manager).dbDriver.ApplySQL([]string{q.SQL}, q.Args)
 					if err != nil {
+						logger.Error().Err(err).Msgf("Failed to apply seed SQL for table %s: %s", ct.Name, q.SQL)
 						return fmt.Errorf("failed to apply seed for table %s: %w", ct.Name, err)
 					}
 				}
@@ -232,6 +244,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	}
 	if shouldSeed {
 		if err := c.runSeedFilesAfterMigration(includeRaw); err != nil {
+			logger.Error().Err(err).Msg("Running seed files after migration failed")
 			return err
 		}
 	}
@@ -247,6 +260,7 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
 	if mgr, ok := c.Driver.(*Manager); ok {
 		mgrFiles, err := mgr.ListSeedFiles(includeRaw)
 		if err != nil {
+			logger.Error().Err(err).Msg("Failed to list seed files from manager")
 			return fmt.Errorf("failed to list seed files: %w", err)
 		}
 		files = append(files, mgrFiles...)
@@ -256,6 +270,7 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
+			logger.Error().Err(err).Msgf("Failed to read seed directory %s", seedDir)
 			return fmt.Errorf("failed to read seed directory %s: %w", seedDir, err)
 		}
 		for _, entry := range entries {
@@ -278,6 +293,7 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
 	}
 	logger.Info().Msgf("Running %d seed file(s) after migration", len(files))
 	if err := c.Driver.RunSeeds(false, includeRaw, files...); err != nil {
+		logger.Error().Err(err).Msg("Failed to run seed files after migration")
 		return fmt.Errorf("failed to apply seed files after migration: %w", err)
 	}
 	return nil
