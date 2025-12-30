@@ -7,7 +7,7 @@ import (
 	"github.com/oarkflow/migrate"
 )
 
-//go:embed ../migrations/* ../migrations/seeds/* ../migrations/templates/*
+//go:embed migrations/* migrations/seeds/*
 var assets embed.FS
 
 func mai2n() {

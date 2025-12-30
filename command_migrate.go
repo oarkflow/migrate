@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +129,11 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	includeRawOption := ctx.Option("include-raw")
 	includeRaw := includeRawOption == "true" || includeRawOption == "1"
 	shouldSeed := seedFlag == "true" || seedFlag == "1"
+
+	// Ensure migrations are applied in deterministic order by filename (timestamp prefix)
+	sort.SliceStable(migrationFiles, func(i, j int) bool {
+		return filepath.Base(migrationFiles[i]) < filepath.Base(migrationFiles[j])
+	})
 
 	for _, path := range migrationFiles {
 		base := filepath.Base(path)
@@ -306,6 +312,12 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
 	if len(files) == 0 {
 		return nil
 	}
+
+	// Ensure seed files are run in deterministic order by filename
+	sort.SliceStable(files, func(i, j int) bool {
+		return filepath.Base(files[i]) < filepath.Base(files[j])
+	})
+
 	logger.Info().Msgf("Running %d seed file(s) after migration", len(files))
 	if err := c.Driver.RunSeeds(false, includeRaw, files...); err != nil {
 		logger.Error().Err(err).Msg("Failed to run seed files after migration")
