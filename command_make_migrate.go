@@ -2,7 +2,7 @@ package migrate
 
 import (
 	"errors"
-	
+
 	"github.com/oarkflow/cli/contracts"
 )
 
@@ -27,6 +27,12 @@ func (c *MakeMigrationCommand) Extend() contracts.Extend {
 				Usage:   "Enable verbose output",
 				Value:   "false",
 			},
+			{
+				Name:    "raw",
+				Aliases: []string{"r"},
+				Usage:   "Create raw SQL migration file",
+				Value:   "false",
+			},
 		},
 	}
 }
@@ -36,5 +42,6 @@ func (c *MakeMigrationCommand) Handle(ctx contracts.Context) error {
 	if name == "" {
 		return errors.New("migration name is required")
 	}
-	return c.Driver.CreateMigrationFile(name)
+	raw := ctx.Option("raw") == "true" || ctx.Option("raw") == "1"
+	return c.Driver.CreateMigrationFile(name, raw)
 }

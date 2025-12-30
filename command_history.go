@@ -104,8 +104,11 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 				}
 				return nil
 			}
-			if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-				filePaths = append(filePaths, path)
+			if !info.IsDir() {
+				ext := strings.ToLower(filepath.Ext(info.Name()))
+				if ext == ".bcl" || ext == ".sql" {
+					filePaths = append(filePaths, path)
+				}
 			}
 			return nil
 		})

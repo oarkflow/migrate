@@ -230,22 +230,17 @@ func (d *DatabaseHistoryDriver) Rollback(histories ...MigrationHistory) error {
 		return fmt.Errorf("invalid table name: %s", d.table)
 	}
 
-	if len(histories) == 0 {
-		// Delete all records
-		query := fmt.Sprintf(`DELETE FROM "%s"`, d.table)
-		_, err := d.db.Exec(query)
+	// Simpler and portable approach: delete all rows and re-insert the remaining
+	// histories using the existing Save method which handles parameterization
+	query := fmt.Sprintf(`DELETE FROM "%s"`, d.table)
+	if _, err := d.db.Exec(query); err != nil {
 		return err
 	}
 
-	// Use parameterized query to prevent SQL injection
-	placeholders := make([]string, len(histories))
-	args := make([]interface{}, len(histories))
-	for i, h := range histories {
-		placeholders[i] = "?"
-		args[i] = h.Name
+	for _, h := range histories {
+		if err := d.Save(h); err != nil {
+			return err
+		}
 	}
-
-	query := fmt.Sprintf(`DELETE FROM "%s" WHERE name NOT IN (%s)`, d.table, strings.Join(placeholders, ", "))
-	_, err := d.db.Exec(query, args...)
-	return err
+	return nil
 }

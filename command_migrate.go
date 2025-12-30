@@ -103,8 +103,11 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 				}
 				return nil
 			}
-			if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-				migrationFiles = append(migrationFiles, path)
+			if !info.IsDir() {
+				ext := strings.ToLower(filepath.Ext(info.Name()))
+				if ext == ".bcl" || ext == ".sql" {
+					migrationFiles = append(migrationFiles, path)
+				}
 			}
 			return nil
 		})
@@ -127,7 +130,19 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	shouldSeed := seedFlag == "true" || seedFlag == "1"
 
 	for _, path := range migrationFiles {
-		name := strings.TrimSuffix(filepath.Base(path), ".bcl")
+		base := filepath.Base(path)
+		ext := strings.ToLower(filepath.Ext(base))
+		name := strings.TrimSuffix(base, ext)
+		// Handle raw .sql migrations
+		if ext == ".sql" {
+			if err := c.Driver.ApplySQLMigration(path); err != nil {
+				logger.Error().Err(err).Msgf("Failed to apply raw SQL migration %s: %v", name, err)
+				return fmt.Errorf("failed to apply raw SQL migration %s: %w", name, err)
+			}
+			continue
+		}
+
+		// Default: .bcl migration
 		data, err := readFile(path)
 		if err != nil {
 			logger.Error().Err(err).Msgf("Failed to read migration file %s from path %s", name, path)

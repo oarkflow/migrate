@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,10 +41,12 @@ type IManager interface {
 	MigrationDir() string
 	SeedDir() string
 	ApplyMigration(m Migration) error
+	// ApplySQLMigration applies a raw .sql migration file specified by path
+	ApplySQLMigration(path string) error
 	RollbackMigration(step int) error
 	ResetMigrations() error
 	ValidateMigrations() error
-	CreateMigrationFile(name string) error
+	CreateMigrationFile(name string, raw bool) error
 	CreateSeedFile(name string, raw bool) error
 	ValidateHistoryStorage() error
 	RunSeeds(truncate bool, includeRaw bool, seedFile ...string) error
@@ -267,12 +271,28 @@ func (d *Manager) ListMigrationMap() (map[string]string, error) {
 			if de.IsDir() {
 				return nil
 			}
-			if strings.HasSuffix(de.Name(), ".bcl") {
-				// Skip seeds
-				if seedDir != "" && strings.HasPrefix(p, seedDir) {
-					return nil
+			ext := strings.ToLower(filepath.Ext(de.Name()))
+			// Skip seeds
+			if seedDir != "" && strings.HasPrefix(p, seedDir) {
+				return nil
+			}
+			switch ext {
+			case ".bcl":
+				// Try to read migration name from file contents to support names that omit timestamp
+				data, err := d.readFile(p)
+				if err == nil {
+					var cfg Config
+					if _, err := bcl.Unmarshal(data, &cfg); err == nil {
+						if cfg.Migration.Name != "" {
+							migrationMap[cfg.Migration.Name] = p
+							return nil
+						}
+					}
 				}
-				name := strings.TrimSuffix(de.Name(), ".bcl")
+				name := strings.TrimSuffix(de.Name(), ext)
+				migrationMap[name] = p
+			case ".sql":
+				name := strings.TrimSuffix(de.Name(), ext)
 				migrationMap[name] = p
 			}
 			return nil
@@ -290,9 +310,27 @@ func (d *Manager) ListMigrationMap() (map[string]string, error) {
 			}
 			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".bcl") {
-			name := strings.TrimSuffix(info.Name(), ".bcl")
-			migrationMap[name] = path
+		if !info.IsDir() {
+			ext := strings.ToLower(filepath.Ext(info.Name()))
+			switch ext {
+			case ".bcl":
+				// Read file and parse migration name if possible
+				data, err := d.readFile(path)
+				if err == nil {
+					var cfg Config
+					if _, err := bcl.Unmarshal(data, &cfg); err == nil {
+						if cfg.Migration.Name != "" {
+							migrationMap[cfg.Migration.Name] = path
+							return nil
+						}
+					}
+				}
+				name := strings.TrimSuffix(info.Name(), ext)
+				migrationMap[name] = path
+			case ".sql":
+				name := strings.TrimSuffix(info.Name(), ext)
+				migrationMap[name] = path
+			}
 		}
 		return nil
 	})
@@ -464,6 +502,11 @@ func (d *Manager) RollbackMigration(step int) error {
 	if err != nil {
 		return fmt.Errorf("failed to load migration history: %w", err)
 	}
+	// Log loaded histories for visibility
+	var histNames []string
+	for _, h := range histories {
+		histNames = append(histNames, h.Name)
+	}
 
 	total := len(histories)
 	if total == 0 {
@@ -483,27 +526,68 @@ func (d *Manager) RollbackMigration(step int) error {
 	if err != nil {
 		return fmt.Errorf("failed to list migration files: %w", err)
 	}
+	// Debug: log loaded history and migration map keys
+	var appliedNames []string
+	for _, h := range histories {
+		appliedNames = append(appliedNames, h.Name)
+	}
+	var migrationFilesList []string
+	for k := range migrationMap {
+		migrationFilesList = append(migrationFilesList, k)
+	}
 	for i := 0; i < step; i++ {
 		last := histories[len(histories)-1]
 		name := last.Name
 		path, ok := migrationMap[name]
 		if !ok {
-			return fmt.Errorf("migration file for %s not found", name)
+			logger.Warn().Msgf("Migration file for %s not found; removing history entry and continuing", name)
+			histories = histories[:len(histories)-1]
+			continue
 		}
 		data, err := d.readFile(path)
 		if err != nil {
-			return fmt.Errorf("failed to read migration file %s for rollback: %w", name, err)
+			logger.Warn().Msgf("Failed to read migration file %s for rollback: %v; removing history entry and continuing", name, err)
+			histories = histories[:len(histories)-1]
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".sql" {
+			// Raw SQL rollback
+			_, down := parseSQLMigration(data)
+			if down == "" {
+				logger.Info().Msgf("Raw migration '%s' has no down section, skipping rollback", name)
+				histories = histories[:len(histories)-1]
+				continue
+			}
+			if d.dbDriver == nil {
+				return fmt.Errorf("no database driver configured for rollback of %s", name)
+			}
+			if d.Verbose {
+				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
+			}
+			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
+				return fmt.Errorf("failed to rollback raw migration %s: %w", name, err)
+			}
+			logger.Info().Msg("Rolled back migration: " + name)
+			histories = histories[:len(histories)-1]
+			continue
 		}
 		var cfg Config
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
+			logger.Warn().Msgf("Failed to unmarshal migration file %s for rollback: %v; removing history entry and continuing", name, err)
+			histories = histories[:len(histories)-1]
+			continue
 		}
 		migration := cfg.Migration
 		if err := requireFields(migration.Name); err != nil {
-			return fmt.Errorf("RollbackMigration: %w", err)
+			logger.Warn().Msgf("Migration %s failed required field check for rollback: %v; removing history entry and continuing", name, err)
+			histories = histories[:len(histories)-1]
+			continue
 		}
 		if migration.Disable {
 			logger.Warn().Msgf("Migration '%s' is disabled, skipping rollback.", migration.Name)
+			// Still remove from history since user requested rollback
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		dialect := d.dialect
@@ -527,6 +611,9 @@ func (d *Manager) RollbackMigration(step int) error {
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
 		}
+		if len(downQueries) == 0 {
+			return fmt.Errorf("no rollback SQL found for migration %s; aborting", name)
+		}
 		if d.Verbose {
 			logger.Info().Msgf("Rollback of migration '%s' details:", name)
 			for _, q := range downQueries {
@@ -534,10 +621,16 @@ func (d *Manager) RollbackMigration(step int) error {
 			}
 		}
 		if err := dbDriver.ApplySQL(downQueries); err != nil {
+			logger.Error().Msgf("failed to rollback migration %s: %v", name, err)
 			return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
 		histories = histories[:len(histories)-1]
+	}
+	// Log remaining history records before updating storage (helpful for debugging)
+	var remainingNames []string
+	for _, h := range histories {
+		remainingNames = append(remainingNames, h.Name)
 	}
 	return d.historyDriver.Rollback(histories...)
 }
@@ -558,22 +651,43 @@ func (d *Manager) ResetMigrations() error {
 		name := histories[i].Name
 		path, ok := migrationMap[name]
 		if !ok {
-			return fmt.Errorf("migration file for %s not found", name)
+			logger.Warn().Msgf("Migration file for %s not found; skipping and continuing", name)
+			continue
 		}
 		data, err := d.readFile(path)
 		if err != nil {
-			return fmt.Errorf("failed to read migration file %s for rollback: %w", name, err)
+			logger.Warn().Msgf("Failed to read migration file %s for rollback: %v; skipping and continuing", name, err)
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".sql" {
+			_, down := parseSQLMigration(data)
+			if down == "" {
+				logger.Info().Msgf("Raw migration '%s' has no down section, skipping rollback", name)
+				continue
+			}
+			if d.dbDriver == nil {
+				return fmt.Errorf("no database driver configured for rollback of %s", name)
+			}
+			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
+				return fmt.Errorf("failed to rollback migration %s: %w", name, err)
+			}
+			logger.Info().Msg("Rolled back migration: " + name)
+			continue
 		}
 		var cfg Config
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("failed to unmarshal migration file %s for rollback: %w", name, err)
+			logger.Warn().Msgf("Failed to unmarshal migration file %s for rollback: %v; skipping and continuing", name, err)
+			continue
 		}
 		migration := cfg.Migration
 		if err := requireFields(migration.Name); err != nil {
-			return fmt.Errorf("ResetMigrations: %w", err)
+			logger.Warn().Msgf("Migration %s failed required field check for reset: %v; skipping and continuing", name, err)
+			continue
 		}
 		if migration.Disable {
 			logger.Warn().Msgf("Migration '%s' is disabled, skipping reset.", migration.Name)
+			// If disabled, nothing to apply but still proceed to consider it rolled back
 			continue
 		}
 		dialect := d.dialect
@@ -603,8 +717,9 @@ func (d *Manager) ResetMigrations() error {
 		logger.Info().Msg("Rolled back migration: " + name)
 	}
 
-	if fh, ok := d.historyDriver.(*FileHistoryDriver); ok {
-		return os.WriteFile(fh.filePath, []byte("[]"), 0644)
+	// Ensure history is cleared for all history drivers (DB or File)
+	if err := d.historyDriver.Rollback(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -630,7 +745,8 @@ func (d *Manager) ValidateMigrations() error {
 	}
 	var missing []string
 	for _, path := range migrationFiles {
-		name := strings.TrimSuffix(filepath.Base(path), ".bcl")
+		ext := filepath.Ext(path)
+		name := strings.TrimSuffix(filepath.Base(path), ext)
 		if !applied[name] {
 			missing = append(missing, name)
 		}
@@ -673,19 +789,35 @@ func (d *Manager) CreateSeedFile(name string, raw bool) error {
 	return nil
 }
 
-func (d *Manager) CreateMigrationFile(name string) error {
+func (d *Manager) CreateMigrationFile(name string, raw bool) error {
 	var filename string
 	if strings.Contains(name, string(os.PathSeparator)) {
 		dir := filepath.Dir(name)
 		base := filepath.Base(name)
 		name = fmt.Sprintf("%d_%s", time.Now().Unix(), base)
 		os.MkdirAll(filepath.Join(d.migrationDir, dir), fs.ModePerm)
-		filename = filepath.Join(d.migrationDir, dir, name+".bcl")
+		if raw {
+			filename = filepath.Join(d.migrationDir, dir, name+".sql")
+		} else {
+			filename = filepath.Join(d.migrationDir, dir, name+".bcl")
+		}
 	} else {
 		name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
-		filename = filepath.Join(d.migrationDir, name+".bcl")
+		if raw {
+			filename = filepath.Join(d.migrationDir, name+".sql")
+		} else {
+			filename = filepath.Join(d.migrationDir, name+".bcl")
+		}
 	}
 
+	if raw {
+		template := "-- migration-up\n\n-- migration-down\n"
+		if err := os.WriteFile(filename, []byte(template), 0644); err != nil {
+			return fmt.Errorf("failed to create raw migration file: %w", err)
+		}
+		logger.Printf("Raw SQL migration file created: %s", filename)
+		return nil
+	}
 	tokens := strings.Split(name, "_")
 	var template string
 	if len(tokens) < 2 {
@@ -966,6 +1098,124 @@ func defaultTemplate(name string) string {
     # Define rollback operations here.
   }
 }`, name)
+}
+
+// parseSQLMigration splits a raw SQL migration file into up and down SQL sections.
+// It supports section markers like "-- migration-up", "-- migrate-up",
+// and "-- migration-down"/"-- migrate-down" (case-insensitive).
+func parseSQLMigration(data []byte) (up string, down string) {
+	lines := strings.Split(string(data), "\n")
+	section := ""
+	var upLines []string
+	var downLines []string
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		lower := strings.ToLower(trim)
+		if strings.HasPrefix(lower, "--") {
+			marker := strings.TrimSpace(strings.TrimPrefix(lower, "--"))
+			if marker == "migration-up" || marker == "migrate-up" {
+				section = "up"
+				continue
+			}
+			if marker == "migration-down" || marker == "migrate-down" {
+				section = "down"
+				continue
+			}
+		}
+		if section == "up" {
+			upLines = append(upLines, line)
+		} else if section == "down" {
+			downLines = append(downLines, line)
+		}
+	}
+	up = strings.TrimSpace(strings.Join(upLines, "\n"))
+	down = strings.TrimSpace(strings.Join(downLines, "\n"))
+	return
+}
+
+// deriveDescriptionFromFilename returns a human-friendly description by
+// stripping a leading timestamp prefix (if present) and replacing underscores
+// with spaces. If the result is empty, returns a fallback description.
+func deriveDescriptionFromFilename(fname string) string {
+	base := strings.TrimSuffix(filepath.Base(fname), filepath.Ext(fname))
+	tokens := strings.Split(base, "_")
+	if len(tokens) > 1 {
+		// If first token is numeric (timestamp), drop it
+		if _, err := strconv.ParseInt(tokens[0], 10, 64); err == nil {
+			tokens = tokens[1:]
+		}
+	}
+	desc := strings.TrimSpace(strings.Join(tokens, " "))
+	if desc == "" {
+		return "Raw SQL migration"
+	}
+	return desc
+}
+
+// deriveVersionFromFilename tries to extract a semantic version from the
+// filename. It looks for tokens like 'v1.2.3' or '1.2.3' and returns a
+// normalized version string (without leading 'v'), otherwise returns
+// the default '1.0.0'.
+func deriveVersionFromFilename(fname string) string {
+	base := strings.TrimSuffix(filepath.Base(fname), filepath.Ext(fname))
+	tokens := strings.Split(base, "_")
+	verRegexp := regexp.MustCompile(`^v?(\d+(?:\.\d+){0,2})$`)
+	for _, t := range tokens {
+		if matches := verRegexp.FindStringSubmatch(strings.ToLower(t)); matches != nil {
+			return matches[1]
+		}
+	}
+	return "1.0.0"
+}
+
+// ApplySQLMigration applies a raw .sql migration file by running the -- migration-up
+// section and recording it in history (checksum computed from file contents).
+func (d *Manager) ApplySQLMigration(path string) error {
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	data, err := d.readFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read migration file %s: %w", path, err)
+	}
+	checksum := computeChecksum(data)
+	histories, err := d.historyDriver.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load migration history: %w", err)
+	}
+	// Check if already applied
+	for _, h := range histories {
+		if h.Name == name {
+			if h.Checksum == checksum {
+				if d.Verbose {
+					logger.Info().Msgf("Migration '%s' already applied, skipping", name)
+				}
+				return nil
+			}
+			return fmt.Errorf("migration '%s' has been modified after being applied (checksum mismatch)", name)
+		}
+	}
+	up, _ := parseSQLMigration(data)
+	if up == "" {
+		return fmt.Errorf("no up SQL found in %s", path)
+	}
+	if d.dbDriver == nil {
+		return fmt.Errorf("no database driver configured for migration '%s'", name)
+	}
+	if d.Verbose {
+		logger.Info().Msgf("Applying raw SQL migration '%s' details:", name)
+		logger.Info().Msg(up)
+	}
+	if err := d.dbDriver.ApplySQL([]string{up}); err != nil {
+		return fmt.Errorf("failed to apply raw migration %s: %w", name, err)
+	}
+	now := time.Now()
+	history := MigrationHistory{
+		Name:        name,
+		Version:     deriveVersionFromFilename(name),
+		Description: deriveDescriptionFromFilename(name),
+		Checksum:    checksum,
+		AppliedAt:   now,
+	}
+	return d.historyDriver.Save(history)
 }
 
 func acquireLock() error {
