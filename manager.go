@@ -176,6 +176,7 @@ func GetCommands(m *Manager) []contracts.Command {
 		&MigrateCommand{Driver: m},
 		&RollbackCommand{Driver: m},
 		&ResetCommand{Driver: m},
+		&ResetDatabaseCommand{Driver: m},
 		&ValidateCommand{Driver: m},
 		&SeedCommand{Driver: m},
 		&MakeSeedCommand{Driver: m},
