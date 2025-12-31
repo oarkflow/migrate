@@ -122,9 +122,13 @@ func LoadConfig(configPath string) (*MigrateConfig, error) {
 	// Start with default config
 	config := DefaultConfig()
 
-	// If no config file specified, return default
+	// If no config file specified, try to load a default config file (./migrate.json)
 	if configPath == "" {
-		return config, nil
+		if _, err := os.Stat("migrate.json"); err == nil {
+			configPath = "migrate.json"
+		} else {
+			return config, nil
+		}
 	}
 
 	// Check if config file exists

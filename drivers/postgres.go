@@ -41,6 +41,38 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 	if len(stmts) == 0 {
 		return nil
 	}
+
+	// If the set of statements includes database-level operations (CREATE/DROP/ALTER DATABASE)
+	// they cannot be executed inside a transaction in Postgres. Execute all statements
+	// individually (without BEGIN/COMMIT) when any such statement is present.
+	hasDBStmt := false
+	for _, q := range stmts {
+		l := strings.ToLower(strings.TrimSpace(q))
+		if strings.HasPrefix(l, "drop database") || strings.HasPrefix(l, "create database") || strings.HasPrefix(l, "alter database") {
+			hasDBStmt = true
+			break
+		}
+	}
+
+	if hasDBStmt {
+		for _, q := range stmts {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			if len(args) > 0 {
+				if _, err := p.db.NamedExec(q, args[0]); err != nil {
+					return fmt.Errorf("failed to execute query [%s]: %w", q, err)
+				}
+			} else {
+				if _, err := p.db.Exec(q); err != nil {
+					return fmt.Errorf("failed to execute query [%s]: %w", q, err)
+				}
+			}
+		}
+		return nil
+	}
+
 	// Begin transaction
 	if _, err := p.db.Exec("BEGIN;"); err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)

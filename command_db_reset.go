@@ -109,8 +109,15 @@ func resetPostgres(cfg *MigrateConfig) error {
 		return fmt.Errorf("failed to connect to postgres for admin operations: %w", err)
 	}
 	name := strings.ReplaceAll(cfg.Database.Database, "\"", "\"\"")
+	// Terminate existing connections to the target database so DROP can succeed
+	terminate := fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid();", strings.ReplaceAll(cfg.Database.Database, "'", "''"))
+	if err := driver.ApplySQL([]string{terminate}); err != nil {
+		// Log as warning and continue; DROP may still fail if other connections remain
+		logger.Warn().Msgf("failed to terminate existing connections to '%s': %v", cfg.Database.Database, err)
+	}
 	drop := fmt.Sprintf("DROP DATABASE IF EXISTS \"%s\";", name)
-	create := fmt.Sprintf("CREATE DATABASE \"%s\";", name)
+	// Create database from template0 to avoid inheriting objects from template1
+	create := fmt.Sprintf("CREATE DATABASE \"%s\" TEMPLATE template0;", name)
 	logger.Info().Msgf("Dropping database '%s'...", cfg.Database.Database)
 	if err := driver.ApplySQL([]string{drop}); err != nil {
 		return fmt.Errorf("failed to drop database: %w", err)
