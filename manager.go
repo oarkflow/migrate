@@ -754,7 +754,7 @@ func (d *Manager) ValidateMigrations() error {
 	}
 	toApply := len(missing)
 	if toApply > 0 {
-		logger.Info().Msgf("Migration initiated for: %v migration(s): %v", toApply, missing)
+		logger.Info().Msgf("Migration initiated for: %v", toApply)
 		return nil
 	}
 	logger.Info().Msg("Migrations are up to date.")
