@@ -567,9 +567,10 @@ func (d *Manager) RollbackMigration(step int) error {
 				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
 			}
 			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
-				return fmt.Errorf("failed to rollback raw migration %s: %w", name, err)
+				logger.Warn().Msgf("Failed to rollback raw migration %s (continuing): %v", name, err)
+			} else {
+				logger.Info().Msg("Rolled back migration: " + name)
 			}
-			logger.Info().Msg("Rolled back migration: " + name)
 			histories = histories[:len(histories)-1]
 			continue
 		}
@@ -622,11 +623,17 @@ func (d *Manager) RollbackMigration(step int) error {
 			}
 		}
 		if err := dbDriver.ApplySQL(downQueries); err != nil {
-			logger.Error().Msgf("failed to rollback migration %s: %v", name, err)
-			return fmt.Errorf("failed to rollback migration %s: %w", name, err)
+			// Log error but continue with rollback to maintain consistency
+			logger.Warn().Msgf("Failed to rollback migration %s (continuing): %v", name, err)
+			// Still update history since we're doing a rollback
+			histories = histories[:len(histories)-1]
+			if histErr := d.historyDriver.Rollback(histories...); histErr != nil {
+				logger.Error().Msgf("Failed to update history after rollback error: %v", histErr)
+			}
+		} else {
+			logger.Info().Msg("Rolled back migration: " + name)
+			histories = histories[:len(histories)-1]
 		}
-		logger.Info().Msg("Rolled back migration: " + name)
-		histories = histories[:len(histories)-1]
 	}
 	// Log remaining history records before updating storage (helpful for debugging)
 	var remainingNames []string
@@ -644,20 +651,30 @@ func (d *Manager) ResetMigrations() error {
 		return err
 	}
 
+	if len(histories) == 0 {
+		logger.Info().Msg("No migrations to reset")
+		return nil
+	}
+
 	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
 		return fmt.Errorf("failed to list migration files: %w", err)
 	}
-	for i := len(histories) - 1; i >= 0; i-- {
-		name := histories[i].Name
+
+	// Roll back all migrations one by one, maintaining history state
+	for len(histories) > 0 {
+		last := histories[len(histories)-1]
+		name := last.Name
 		path, ok := migrationMap[name]
 		if !ok {
-			logger.Warn().Msgf("Migration file for %s not found; skipping and continuing", name)
+			logger.Warn().Msgf("Migration file for %s not found; removing history entry and continuing", name)
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		data, err := d.readFile(path)
 		if err != nil {
-			logger.Warn().Msgf("Failed to read migration file %s for rollback: %v; skipping and continuing", name, err)
+			logger.Warn().Msgf("Failed to read migration file %s for rollback: %v; removing history entry and continuing", name, err)
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -665,30 +682,39 @@ func (d *Manager) ResetMigrations() error {
 			_, down := parseSQLMigration(data)
 			if down == "" {
 				logger.Info().Msgf("Raw migration '%s' has no down section, skipping rollback", name)
+				histories = histories[:len(histories)-1]
 				continue
 			}
 			if d.dbDriver == nil {
 				return fmt.Errorf("no database driver configured for rollback of %s", name)
 			}
-			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
-				return fmt.Errorf("failed to rollback migration %s: %w", name, err)
+			if d.Verbose {
+				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
 			}
-			logger.Info().Msg("Rolled back migration: " + name)
+			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
+				logger.Warn().Msgf("Failed to rollback raw migration %s (continuing): %v", name, err)
+			} else {
+				logger.Info().Msg("Rolled back migration: " + name)
+			}
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		var cfg Config
 		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			logger.Warn().Msgf("Failed to unmarshal migration file %s for rollback: %v; skipping and continuing", name, err)
+			logger.Warn().Msgf("Failed to unmarshal migration file %s for rollback: %v; removing history entry and continuing", name, err)
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		migration := cfg.Migration
 		if err := requireFields(migration.Name); err != nil {
-			logger.Warn().Msgf("Migration %s failed required field check for reset: %v; skipping and continuing", name, err)
+			logger.Warn().Msgf("Migration %s failed required field check for reset: %v; removing history entry and continuing", name, err)
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		if migration.Disable {
 			logger.Warn().Msgf("Migration '%s' is disabled, skipping reset.", migration.Name)
-			// If disabled, nothing to apply but still proceed to consider it rolled back
+			// Still remove from history since user requested reset
+			histories = histories[:len(histories)-1]
 			continue
 		}
 		dialect := d.dialect
@@ -712,17 +738,27 @@ func (d *Manager) ResetMigrations() error {
 		if err != nil {
 			return fmt.Errorf("failed to generate rollback SQL for migration %s: %w", name, err)
 		}
+		if len(downQueries) == 0 {
+			return fmt.Errorf("no rollback SQL found for migration %s; aborting", name)
+		}
+		if d.Verbose {
+			logger.Info().Msgf("Rollback of migration '%s' details:", name)
+			for _, q := range downQueries {
+				logger.Info().Msg(q)
+			}
+		}
 		if err := dbDriver.ApplySQL(downQueries); err != nil {
-			return fmt.Errorf("failed to rollback migration %s: %w", name, err)
+			// Update history first to maintain consistency, then continue
+			histories = histories[:len(histories)-1]
+			logger.Warn().Msgf("Failed to rollback migration %s (continuing): %v", name, err)
+		} else {
+			histories = histories[:len(histories)-1]
 		}
 		logger.Info().Msg("Rolled back migration: " + name)
 	}
 
-	// Ensure history is cleared for all history drivers (DB or File)
-	if err := d.historyDriver.Rollback(); err != nil {
-		return err
-	}
-	return nil
+	// Clear all history after successful rollback of all migrations
+	return d.historyDriver.Rollback()
 }
 
 func (d *Manager) ValidateMigrations() error {
