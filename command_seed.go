@@ -98,6 +98,7 @@ func (c *SeedCommand) Handle(ctx contracts.Context) error {
 	if seedFile != "" {
 		ext := strings.ToLower(filepath.Ext(seedFile))
 		if ext == ".sql" && !includeRaw {
+			logger.Printf("Raw seed file specified but --include-raw not set: %s", seedFile)
 			return fmt.Errorf("raw seed file specified but --include-raw not set: %s", seedFile)
 		}
 		files = append(files, seedFile)
@@ -106,6 +107,7 @@ func (c *SeedCommand) Handle(ctx contracts.Context) error {
 		if mgr, ok := c.Driver.(*Manager); ok {
 			mgrFiles, err := mgr.ListSeedFiles(includeRaw)
 			if err != nil {
+				logger.Printf("Failed to list seed files: %v", err)
 				return fmt.Errorf("failed to list seed files: %w", err)
 			}
 			files = append(files, mgrFiles...)

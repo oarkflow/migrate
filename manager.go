@@ -1323,7 +1323,8 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 			}
 			data, err := d.readFile(seedFile)
 			if err != nil {
-				return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
+				logger.Error().Msgf("Failed to read seed file '%s': %v", seedFile, err)
+				continue
 			}
 			sql := strings.TrimSpace(string(data))
 			if sql == "" {
@@ -1331,33 +1332,38 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 				continue
 			}
 			if d.Verbose {
-				logger.Info().Msgf("Raw seed SQL (%d bytes): %s", len(sql), sql)
+				logger.Info().Msgf("Raw seed SQL (%d bytes)", len(sql))
 			}
 			if truncate {
 				logger.Warn().Msgf("Truncate flag ignored for raw seed file: %s", seedFile)
 			}
 			logger.Info().Msgf("Applying raw seed file: %s", seedFile)
 			if err := d.dbDriver.ApplySQL([]string{sql}); err != nil {
-				return fmt.Errorf("failed to apply raw seed '%s': %w", seedFile, err)
+				logger.Error().Msgf("Failed to apply raw seed file '%s': %v", seedFile, err)
+				continue
 			}
 		case ".bcl":
 			data, err := d.readFile(seedFile)
 			if err != nil {
-				return fmt.Errorf("failed to read seed file '%s': %w", seedFile, err)
+				logger.Error().Msgf("Failed to read seed file '%s': %v", seedFile, err)
+				continue
 			}
 
 			var cfg SeedConfig
 			if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-				return fmt.Errorf("failed to unmarshal seed file '%s': %w", seedFile, err)
+				logger.Error().Msgf("Failed to unmarshal seed file '%s': %v", seedFile, err)
+				continue
 			}
 
 			if err := requireFields(cfg.Seed.Name, cfg.Seed.Table); err != nil {
-				return fmt.Errorf("invalid seed configuration in '%s': %w", seedFile, err)
+				logger.Error().Msgf("Invalid seed configuration in '%s': %v", seedFile, err)
+				continue
 			}
 
 			queries, err := cfg.Seed.ToSQL(d.dialect)
 			if err != nil {
-				return fmt.Errorf("failed to generate seed SQL for '%s': %w", seedFile, err)
+				logger.Error().Msgf("Failed to generate seed SQL for '%s': %v", seedFile, err)
+				continue
 			}
 
 			if len(queries) == 0 {
@@ -1369,21 +1375,25 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 				if query != "" {
 					logger.Info().Msgf("Truncating table: %s", cfg.Seed.Table)
 					if d.Verbose {
-						logger.Info().Msgf("Truncate SQL: %s", query)
+						logger.Info().Msg("Executing truncate SQL")
 					}
 					if err := d.dbDriver.ApplySQL([]string{query}); err != nil {
-						return fmt.Errorf("failed to truncate table %s: %w", cfg.Seed.Table, err)
+						logger.Error().Msgf("Failed to truncate table '%s': %v", cfg.Seed.Table, err)
+						continue
 					}
 				} else {
-					return fmt.Errorf("unsupported dialect for truncation: %s", d.dialect)
+					logger.Error().Msgf("Unsupported dialect for truncation: %s", d.dialect)
+					continue
 				}
 			}
 			logger.Info().Msgf("Seeding table: %s", cfg.Seed.Table)
 			for _, q := range queries {
-				logger.Info().Msgf("Seed SQL: %s", q.SQL)
+				if d.Verbose {
+					logger.Info().Msg("Executing seed SQL")
+				}
 				if err := d.dbDriver.ApplySQL([]string{q.SQL}, q.Args); err != nil {
 					logger.Error().Msgf("Seed failed (%s): %v", seedFile, err)
-					return fmt.Errorf("failed to apply seed '%s': %w", seedFile, err)
+					continue
 				}
 			}
 		default:
