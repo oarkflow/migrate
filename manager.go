@@ -61,6 +61,8 @@ type Manager struct {
 	historyDriver HistoryDriver
 	Verbose       bool
 	command       []contracts.Command
+	// configPath stores the path to the config file that was loaded
+	configPath string
 	// assets holds an optional embedded filesystem (using //go:embed from the
 	// application that embeds migrations/seeds/templates). When set, file
 	// reads and directory walks will prefer this FS over the OS filesystem.
@@ -102,6 +104,13 @@ func WithHistoryDriver(driver HistoryDriver) ManagerOption {
 func WithDialect(dialect string) ManagerOption {
 	return func(m *Manager) {
 		m.dialect = dialect
+	}
+}
+
+// WithConfigPath stores the config file path in the manager
+func WithConfigPath(path string) ManagerOption {
+	return func(m *Manager) {
+		m.configPath = path
 	}
 }
 
@@ -206,7 +215,7 @@ func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, e
 	}
 
 	// Create manager with configuration
-	allOpts := []ManagerOption{WithConfig(config)}
+	allOpts := []ManagerOption{WithConfig(config), WithConfigPath(configPath)}
 	allOpts = append(allOpts, opts...)
 
 	manager := NewManager(allOpts...)
@@ -244,6 +253,11 @@ func (d *Manager) MigrationDir() string {
 
 func (d *Manager) SeedDir() string {
 	return d.seedDir
+}
+
+// ConfigPath returns the path to the config file that was loaded
+func (d *Manager) ConfigPath() string {
+	return d.configPath
 }
 
 func (d *Manager) ValidateHistoryStorage() error {

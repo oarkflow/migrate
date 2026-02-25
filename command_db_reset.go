@@ -52,6 +52,13 @@ func (c *ResetDatabaseCommand) Handle(ctx contracts.Context) error {
 	force := ctx.Option("force") == "true" || ctx.Option("force") == "1"
 	verbose := ctx.Option("verbose") == "true" || ctx.Option("verbose") == "1"
 
+	// If no config path from CLI, use the one from Manager (set via --config at startup)
+	if configPath == "" {
+		if mgr, ok := c.Driver.(*Manager); ok {
+			configPath = mgr.ConfigPath()
+		}
+	}
+
 	// Load config (or defaults) and apply env overrides
 	cfg, err := LoadConfig(configPath)
 	if err != nil {

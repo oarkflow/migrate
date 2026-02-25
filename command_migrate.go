@@ -142,7 +142,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		// Handle raw .sql migrations
 		if ext == ".sql" {
 			if err := c.Driver.ApplySQLMigration(path); err != nil {
-				logger.Error().Err(err).Msgf("Failed to apply raw SQL migration %s: %v", name, err)
+				logger.Error().Err(err).Msgf("Failed to apply raw SQL migration %s", name)
 				return fmt.Errorf("failed to apply raw SQL migration %s: %w", name, err)
 			}
 			continue
