@@ -116,25 +116,38 @@ func WithConfigPath(path string) ManagerOption {
 
 func WithConfig(config *MigrateConfig) ManagerOption {
 	return func(m *Manager) {
+		normalizedDriver := config.Database.Driver
+		if config.Database.Driver != "" {
+			if drv, err := NormalizeDriver(config.Database.Driver); err == nil {
+				normalizedDriver = drv
+			} else {
+				logger.Error().Err(err).Msgf("Invalid database driver in config: %s", config.Database.Driver)
+			}
+		}
+
 		// Apply configuration settings
 		m.migrationDir = config.Migration.Directory
 		m.seedDir = config.Seed.Directory
-		m.dialect = config.Database.Driver
+		m.dialect = normalizedDriver
 		m.Verbose = config.Logging.Verbose
 
 		// Set up database driver if configuration is complete
-		if config.Database.Driver != "" && config.Database.Database != "" {
+		if normalizedDriver != "" && config.Database.Database != "" {
 			dsn := config.GetDSN()
 			if dsn != "" {
-				driver, err := NewDriver(config.Database.Driver, dsn)
+				driver, err := NewDriver(normalizedDriver, dsn)
 				if err == nil {
 					m.dbDriver = driver
 
 					// Set up history driver
-					historyDriver, err := NewHistoryDriver("db", config.Database.Driver, dsn, config.Migration.TableName)
+					historyDriver, err := NewHistoryDriver("db", normalizedDriver, dsn, config.Migration.TableName)
 					if err == nil {
 						m.historyDriver = historyDriver
+					} else {
+						logger.Error().Err(err).Msg("Failed to initialize history driver from config")
 					}
+				} else {
+					logger.Error().Err(err).Msg("Failed to initialize database driver from config")
 				}
 			}
 		}
@@ -213,9 +226,34 @@ func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, e
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
+	normalizedDriver, err := NormalizeDriver(config.Database.Driver)
+	if err != nil {
+		return nil, fmt.Errorf("invalid database driver: %w", err)
+	}
+	config.Database.Driver = normalizedDriver
+
+	dsn := config.GetDSN()
+	if dsn == "" {
+		return nil, fmt.Errorf("failed to build DSN for driver %s", config.Database.Driver)
+	}
+
+	driver, err := NewDriver(config.Database.Driver, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database driver: %w", err)
+	}
+	historyDriver, err := NewHistoryDriver("db", config.Database.Driver, dsn, config.Migration.TableName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize history driver: %w", err)
+	}
 
 	// Create manager with configuration
-	allOpts := []ManagerOption{WithConfig(config), WithConfigPath(configPath)}
+	allOpts := []ManagerOption{
+		WithConfig(config),
+		WithConfigPath(configPath),
+		WithDriver(driver),
+		WithHistoryDriver(historyDriver),
+		WithDialect(config.Database.Driver),
+	}
 	allOpts = append(allOpts, opts...)
 
 	manager := NewManager(allOpts...)
@@ -476,7 +514,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 			logger.Info().Msg(q)
 		}
 	}
-	if d.dbDriver == nil {
+	if dbDriver == nil {
 		return fmt.Errorf("no database driver configured for migration '%s'", m.Name)
 	}
 	if len(queries) == 0 {

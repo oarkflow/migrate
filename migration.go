@@ -703,7 +703,11 @@ func NormalizeDriver(driver string) (string, error) {
 }
 
 func NewDriver(driver string, dsn string) (IDatabaseDriver, error) {
-	switch driver {
+	normalizedDriver, err := NormalizeDriver(driver)
+	if err != nil {
+		return nil, err
+	}
+	switch normalizedDriver {
 	case "mysql":
 		return drivers.NewMySQLDriver(dsn)
 	case "postgres":
@@ -711,11 +715,15 @@ func NewDriver(driver string, dsn string) (IDatabaseDriver, error) {
 	case "sqlite":
 		return drivers.NewSQLiteDriver(dsn)
 	}
-	return nil, fmt.Errorf("unsupported driver: %s", driver)
+	return nil, fmt.Errorf("unsupported driver: %s", normalizedDriver)
 }
 
 func NewFromDB(driver string, db *squealx.DB) (IDatabaseDriver, error) {
-	switch driver {
+	normalizedDriver, err := NormalizeDriver(driver)
+	if err != nil {
+		return nil, err
+	}
+	switch normalizedDriver {
 	case "mysql":
 		return drivers.NewMySQLDriverFromDB(db), nil
 	case "postgres":
@@ -723,7 +731,7 @@ func NewFromDB(driver string, db *squealx.DB) (IDatabaseDriver, error) {
 	case "sqlite":
 		return drivers.NewSQLiteDriverFromDB(db), nil
 	}
-	return nil, fmt.Errorf("unsupported driver: %s", driver)
+	return nil, fmt.Errorf("unsupported driver: %s", normalizedDriver)
 }
 
 // NewHistoryDriver returns an implementation of HistoryDriver (file, db, etc.)
@@ -732,7 +740,11 @@ func NewHistoryDriver(driver, dialect, config string, tables ...string) (History
 	case "file":
 		return NewFileHistoryDriver(config), nil
 	case "db":
-		return NewDatabaseHistoryDriver(dialect, config, tables...)
+		normalizedDialect, err := NormalizeDriver(dialect)
+		if err != nil {
+			return nil, err
+		}
+		return NewDatabaseHistoryDriver(normalizedDialect, config, tables...)
 	default:
 		return nil, fmt.Errorf("unsupported history driver: %s", driver)
 	}

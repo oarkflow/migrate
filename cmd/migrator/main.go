@@ -89,6 +89,20 @@ func Run(dialect string, cfg ...Config) error {
 		return nil
 	}
 
+	// If no explicit config is provided, auto-load default migrate.json when present.
+	// This keeps plain `migrator ... migrate` behavior intuitive.
+	if _, err := os.Stat("migrate.json"); err == nil {
+		manager, err := migrate.NewManagerFromConfig("migrate.json")
+		if err != nil {
+			return err
+		}
+		if dialect != "" {
+			manager.SetDialect(dialect)
+		}
+		manager.Run()
+		return nil
+	}
+
 	var opts []migrate.ManagerOption
 	if config.Config.Driver != "" {
 		dsn := config.ToString()
