@@ -35,6 +35,12 @@ func (c *MigrateCommand) Extend() contracts.Extend {
 				Value:   "false",
 			},
 			{
+				Name:    "force",
+				Aliases: []string{"f"},
+				Usage:   "Force apply migrations ignoring checksum mismatches and statement errors",
+				Value:   "false",
+			},
+			{
 				Name:    "seed",
 				Aliases: []string{"s"},
 				Usage:   "Seed tables after migration",
@@ -59,8 +65,15 @@ func (c *MigrateCommand) Extend() contracts.Extend {
 func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	// Set verbose flag on Manager if -v is passed
 	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
+	forceFlag := ctx.Option("f") != "" && ctx.Option("f") != "false"
 	if mgr, ok := c.Driver.(*Manager); ok {
 		mgr.Verbose = verbose
+		if forceFlag {
+			mgr.Force = true
+			if mgr.dbDriver != nil {
+				mgr.dbDriver.SetForce(true)
+			}
+		}
 	}
 	if err := c.Driver.ValidateHistoryStorage(); err != nil {
 		logger.Error().Err(err).Msg("History storage validation failed")
@@ -143,6 +156,9 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		if ext == ".sql" {
 			if err := c.Driver.ApplySQLMigration(path); err != nil {
 				logger.Error().Err(err).Msgf("Failed to apply raw SQL migration %s", name)
+				if forceFlag {
+					continue
+				}
 				return fmt.Errorf("failed to apply raw SQL migration %s: %w", name, err)
 			}
 			continue
@@ -176,6 +192,9 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		}
 		if err := c.Driver.ApplyMigration(migration); err != nil {
 			logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
+			if forceFlag {
+				continue
+			}
 			return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
 		}
 		for _, val := range migration.Validate {

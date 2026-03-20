@@ -9,7 +9,12 @@ import (
 )
 
 type MySQLDriver struct {
-	db *squealx.DB
+	db    *squealx.DB
+	Force bool
+}
+
+func (m *MySQLDriver) SetForce(force bool) {
+	m.Force = force
 }
 
 func NewMySQLDriverFromDB(db *squealx.DB) *MySQLDriver {
@@ -39,6 +44,26 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 		}
 	}
 	if len(stmts) == 0 {
+		return nil
+	}
+
+	// Force mode: execute each statement individually without transaction, log errors and continue
+	if m.Force {
+		for _, q := range stmts {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			var err error
+			if len(args) > 0 {
+				_, err = m.db.NamedExec(q, args[0])
+			} else {
+				_, err = m.db.Exec(q)
+			}
+			if err != nil {
+				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
+			}
+		}
 		return nil
 	}
 

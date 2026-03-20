@@ -29,6 +29,12 @@ func (c *RollbackCommand) Extend() contracts.Extend {
 				Value:   "false",
 			},
 			{
+				Name:    "force",
+				Aliases: []string{"f"},
+				Usage:   "Force rollback ignoring statement errors",
+				Value:   "false",
+			},
+			{
 				Name:    "step",
 				Aliases: []string{"s"},
 				Usage:   "Number of migrations to rollback (default: 1)",
@@ -40,8 +46,15 @@ func (c *RollbackCommand) Extend() contracts.Extend {
 
 func (c *RollbackCommand) Handle(ctx contracts.Context) error {
 	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
+	forceFlag := ctx.Option("f") != "" && ctx.Option("f") != "false"
 	if mgr, ok := c.Driver.(*Manager); ok {
 		mgr.Verbose = verbose
+		if forceFlag {
+			mgr.Force = true
+			if mgr.dbDriver != nil {
+				mgr.dbDriver.SetForce(true)
+			}
+		}
 	}
 	stepStr := ctx.Option("step")
 	step := 1

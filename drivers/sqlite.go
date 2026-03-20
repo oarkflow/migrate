@@ -9,7 +9,12 @@ import (
 )
 
 type SQLiteDriver struct {
-	db *squealx.DB
+	db    *squealx.DB
+	Force bool
+}
+
+func (s *SQLiteDriver) SetForce(force bool) {
+	s.Force = force
 }
 
 func NewSQLiteDriverFromDB(db *squealx.DB) *SQLiteDriver {
@@ -39,6 +44,26 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 		}
 	}
 	if len(stmts) == 0 {
+		return nil
+	}
+
+	// Force mode: execute each statement individually without transaction, log errors and continue
+	if s.Force {
+		for _, q := range stmts {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			var err error
+			if len(args) > 0 {
+				_, err = s.db.NamedExec(q, args[0])
+			} else {
+				_, err = s.db.Exec(q)
+			}
+			if err != nil {
+				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
+			}
+		}
 		return nil
 	}
 

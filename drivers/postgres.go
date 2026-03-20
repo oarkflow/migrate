@@ -9,7 +9,12 @@ import (
 )
 
 type PostgresDriver struct {
-	db *squealx.DB
+	db    *squealx.DB
+	Force bool
+}
+
+func (p *PostgresDriver) SetForce(force bool) {
+	p.Force = force
 }
 
 func NewPostgresDriverFromDB(db *squealx.DB) *PostgresDriver {
@@ -78,6 +83,26 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 				if _, err := p.db.Exec(q); err != nil {
 					return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 				}
+			}
+		}
+		return nil
+	}
+
+	// Force mode: execute each statement individually without transaction, log errors and continue
+	if p.Force {
+		for _, q := range stmts {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			var err error
+			if len(args) > 0 {
+				_, err = p.db.NamedExec(q, args[0])
+			} else {
+				_, err = p.db.Exec(q)
+			}
+			if err != nil {
+				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
 			}
 		}
 		return nil

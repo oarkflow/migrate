@@ -35,6 +35,7 @@ var logger = log.Logger{
 type IDatabaseDriver interface {
 	ApplySQL(queries []string, args ...any) error
 	DB() *squealx.DB
+	SetForce(force bool)
 }
 
 type IManager interface {
@@ -60,6 +61,7 @@ type Manager struct {
 	dbDriver      IDatabaseDriver
 	historyDriver HistoryDriver
 	Verbose       bool
+	Force         bool
 	command       []contracts.Command
 	// configPath stores the path to the config file that was loaded
 	configPath string
@@ -475,6 +477,11 @@ func (d *Manager) ApplyMigration(m Migration) error {
 					logger.Info().Msgf("Migration '%s' already applied, skipping", m.Name)
 				}
 				return nil
+			}
+			if d.Force {
+				logger.Warn().Msgf("Checksum mismatch for '%s', force-applying", m.Name)
+				d.historyDriver.Rollback(h)
+				break
 			}
 			return fmt.Errorf("migration '%s' has been modified after being applied (checksum mismatch)", m.Name)
 		}
@@ -1278,6 +1285,11 @@ func (d *Manager) ApplySQLMigration(path string) error {
 					logger.Info().Msgf("Migration '%s' already applied, skipping", name)
 				}
 				return nil
+			}
+			if d.Force {
+				logger.Warn().Msgf("Checksum mismatch for '%s', force-applying", name)
+				d.historyDriver.Rollback(h)
+				break
 			}
 			return fmt.Errorf("migration '%s' has been modified after being applied (checksum mismatch)", name)
 		}
