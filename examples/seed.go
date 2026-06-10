@@ -5,8 +5,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/oarkflow/bcl"
-
 	"github.com/oarkflow/migrate"
 )
 
@@ -15,11 +13,11 @@ func seedExample() {
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)
 	}
-	var cfg migrate.SeedConfig
-	if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("Failed to unmarshal migration file: %v", err)
+	seed, err := migrate.ParseSeedBCL(data)
+	if err != nil {
+		log.Fatalf("Failed to parse seed file: %v", err)
 	}
-	queries, err := cfg.Seed.ToSQL("postgres")
+	queries, err := seed.ToSQL("postgres")
 	if err != nil {
 		log.Fatalf("Failed to generate seed SQL: %v", err)
 	}

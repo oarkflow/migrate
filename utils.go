@@ -4,13 +4,37 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v6"
-	"github.com/oarkflow/bcl"
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+type SeedFunction func(args ...any) (any, error)
+
+var seedFunctions = struct {
+	sync.RWMutex
+	m map[string]SeedFunction
+}{m: make(map[string]SeedFunction)}
+
+func RegisterSeedFunction(name string, fn SeedFunction) {
+	name = strings.TrimSpace(name)
+	if name == "" || fn == nil {
+		return
+	}
+	seedFunctions.Lock()
+	defer seedFunctions.Unlock()
+	seedFunctions.m[name] = fn
+}
+
+func lookupSeedFunction(name string) (SeedFunction, bool) {
+	seedFunctions.RLock()
+	defer seedFunctions.RUnlock()
+	fn, ok := seedFunctions.m[name]
+	return fn, ok
+}
 
 func randomString(length int) string {
 	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -25,10 +49,10 @@ func init() {
 	// Note: rand.Seed() is deprecated in Go 1.20+
 	// The global random number generator is automatically seeded
 	f := gofakeit.New(0)
-	bcl.RegisterFunction("fake_uuid", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_uuid", func(args ...any) (any, error) {
 		return f.UUID(), nil
 	})
-	bcl.RegisterFunction("fake_age", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_age", func(args ...any) (any, error) {
 		min := 1
 		max := 100
 		var ok1, ok2 bool
@@ -45,75 +69,75 @@ func init() {
 		}
 		return rand.Intn(max-min+1) + min, nil
 	})
-	bcl.RegisterFunction("fake_name", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_name", func(args ...any) (any, error) {
 		return f.Name(), nil
 	})
-	bcl.RegisterFunction("fake_firstname", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_firstname", func(args ...any) (any, error) {
 		return f.FirstName(), nil
 	})
-	bcl.RegisterFunction("fake_lastname", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_lastname", func(args ...any) (any, error) {
 		return f.LastName(), nil
 	})
-	bcl.RegisterFunction("fake_email", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_email", func(args ...any) (any, error) {
 		return f.Email(), nil
 	})
-	bcl.RegisterFunction("fake_phone", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_phone", func(args ...any) (any, error) {
 		return f.Phone(), nil
 	})
-	bcl.RegisterFunction("fake_address", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_address", func(args ...any) (any, error) {
 		return f.Address().Address, nil
 	})
-	bcl.RegisterFunction("fake_city", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_city", func(args ...any) (any, error) {
 		return f.City(), nil
 	})
-	bcl.RegisterFunction("fake_state", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_state", func(args ...any) (any, error) {
 		return f.State(), nil
 	})
-	bcl.RegisterFunction("fake_zip", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_zip", func(args ...any) (any, error) {
 		return f.Zip(), nil
 	})
-	bcl.RegisterFunction("fake_country", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_country", func(args ...any) (any, error) {
 		return f.Country(), nil
 	})
-	bcl.RegisterFunction("fake_company", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_company", func(args ...any) (any, error) {
 		return f.Company(), nil
 	})
-	bcl.RegisterFunction("fake_jobtitle", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_jobtitle", func(args ...any) (any, error) {
 		return f.JobTitle(), nil
 	})
-	bcl.RegisterFunction("fake_ssn", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_ssn", func(args ...any) (any, error) {
 		return f.SSN(), nil
 	})
-	bcl.RegisterFunction("fake_creditcard", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_creditcard", func(args ...any) (any, error) {
 		return f.CreditCardNumber(nil), nil
 	})
-	bcl.RegisterFunction("fake_currency", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_currency", func(args ...any) (any, error) {
 		return f.CurrencyShort(), nil
 	})
-	bcl.RegisterFunction("fake_macaddress", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_macaddress", func(args ...any) (any, error) {
 		return f.MacAddress(), nil
 	})
-	bcl.RegisterFunction("fake_ipv4", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_ipv4", func(args ...any) (any, error) {
 		return f.IPv4Address(), nil
 	})
-	bcl.RegisterFunction("fake_ipv6", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_ipv6", func(args ...any) (any, error) {
 		return f.IPv6Address(), nil
 	})
 
-	bcl.RegisterFunction("fake_date", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_date", func(args ...any) (any, error) {
 		return f.Date(), nil
 	})
 
-	bcl.RegisterFunction("fake_datetime", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_datetime", func(args ...any) (any, error) {
 		return f.Date().Format(time.DateTime), nil
 	})
-	bcl.RegisterFunction("fake_pastdate", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_pastdate", func(args ...any) (any, error) {
 		return f.DateRange(time.Now().AddDate(-10, 0, 0), time.Now()), nil
 	})
-	bcl.RegisterFunction("fake_futuredate", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_futuredate", func(args ...any) (any, error) {
 		return f.DateRange(time.Now(), time.Now().AddDate(10, 0, 0)), nil
 	})
-	bcl.RegisterFunction("fake_daterange", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_daterange", func(args ...any) (any, error) {
 		if len(args) < 2 {
 			return nil, fmt.Errorf("fake_daterange requires 2 arguments: start and end time (YYYY-MM-DD)")
 		}
@@ -132,70 +156,70 @@ func init() {
 		}
 		return f.DateRange(start, end), nil
 	})
-	bcl.RegisterFunction("fake_nanosecond", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_nanosecond", func(args ...any) (any, error) {
 		return f.Date().Nanosecond(), nil
 	})
-	bcl.RegisterFunction("fake_second", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_second", func(args ...any) (any, error) {
 		return f.Date().Second(), nil
 	})
-	bcl.RegisterFunction("fake_minute", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_minute", func(args ...any) (any, error) {
 		return f.Date().Minute(), nil
 	})
-	bcl.RegisterFunction("fake_hour", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_hour", func(args ...any) (any, error) {
 		return f.Date().Hour(), nil
 	})
-	bcl.RegisterFunction("fake_month", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_month", func(args ...any) (any, error) {
 		return int(f.Date().Month()), nil
 	})
-	bcl.RegisterFunction("fake_monthstring", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_monthstring", func(args ...any) (any, error) {
 		return f.Date().Month().String(), nil
 	})
-	bcl.RegisterFunction("fake_day", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_day", func(args ...any) (any, error) {
 		return f.Date().Day(), nil
 	})
 
-	bcl.RegisterFunction("fake_string", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_string", func(args ...any) (any, error) {
 		return randomString(10), nil
 	})
-	bcl.RegisterFunction("fake_status", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_status", func(args ...any) (any, error) {
 		return f.RandomString([]string{"ACTIVE", "INACTIVE", "BANNED", "SUSPENDED"}), nil
 	})
-	bcl.RegisterFunction("fake_bool", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_bool", func(args ...any) (any, error) {
 		return f.Bool(), nil
 	})
-	bcl.RegisterFunction("fake_int", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_int", func(args ...any) (any, error) {
 		return f.Int8(), nil
 	})
-	bcl.RegisterFunction("fake_uint", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_uint", func(args ...any) (any, error) {
 		return f.Uint8(), nil
 	})
-	bcl.RegisterFunction("fake_float32", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_float32", func(args ...any) (any, error) {
 		return f.Float32(), nil
 	})
-	bcl.RegisterFunction("fake_float64", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_float64", func(args ...any) (any, error) {
 		return f.Float64(), nil
 	})
-	bcl.RegisterFunction("fake_year", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_year", func(args ...any) (any, error) {
 		return f.Date().Year(), nil
 	})
-	bcl.RegisterFunction("fake_timezone", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_timezone", func(args ...any) (any, error) {
 		return f.Date().Location().String(), nil
 	})
-	bcl.RegisterFunction("fake_timezoneabv", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_timezoneabv", func(args ...any) (any, error) {
 		t := f.Date()
 		abbr, _ := t.Zone()
 		return abbr, nil
 	})
-	bcl.RegisterFunction("fake_timezonefull", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_timezonefull", func(args ...any) (any, error) {
 		return f.Date().Location().String(), nil
 	})
-	bcl.RegisterFunction("fake_timezoneoffset", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_timezoneoffset", func(args ...any) (any, error) {
 		t := f.Date()
 		_, offset := t.Zone()
 		hOffset := float32(offset) / 3600.0
 		return hOffset, nil
 	})
-	bcl.RegisterFunction("fake_timezoneregion", func(args ...any) (any, error) {
+	RegisterSeedFunction("fake_timezoneregion", func(args ...any) (any, error) {
 		return f.Date().Location().String(), nil
 	})
 }

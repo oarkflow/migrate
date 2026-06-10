@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli/contracts"
 )
 
@@ -55,7 +54,7 @@ func (c *MigrateCommand) Extend() contracts.Extend {
 			{
 				Name:    "include-raw",
 				Aliases: []string{"i"},
-				Usage:   "Include raw .sql seed files after migration",
+				Usage:   "Include raw .sql migrations and raw .sql seed files",
 				Value:   "false",
 			},
 		},
@@ -94,16 +93,29 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	// Collect migration files (.bcl) - prefer Manager.ListMigrationMap when available
 	var migrationFiles []string
 	var readFile func(string) ([]byte, error)
+	var readMigrations func(string) ([]Migration, error)
 	if mgr, ok := c.Driver.(*Manager); ok {
 		migrationMap, err := mgr.ListMigrationMap()
 		if err != nil {
 			logger.Error().Err(err).Msg("Failed to list migrations from manager")
 			return fmt.Errorf("failed to list migrations: %w", err)
 		}
+		seenPaths := make(map[string]struct{}, len(migrationMap))
 		for _, p := range migrationMap {
+			if _, ok := seenPaths[p]; ok {
+				continue
+			}
+			seenPaths[p] = struct{}{}
 			migrationFiles = append(migrationFiles, p)
 		}
 		readFile = mgr.readFile
+		readMigrations = func(path string) ([]Migration, error) {
+			cached, err := mgr.readMigrationsBCL(path)
+			if err != nil {
+				return nil, err
+			}
+			return cached.migrations, nil
+		}
 	} else {
 		seedDir := c.Driver.SeedDir()
 		err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
@@ -130,6 +142,13 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			return fmt.Errorf("failed to walk migration directory: %w", err)
 		}
 		readFile = os.ReadFile
+		readMigrations = func(path string) ([]Migration, error) {
+			data, err := readFile(path)
+			if err != nil {
+				return nil, err
+			}
+			return ParseMigrationsBCL(data)
+		}
 	}
 
 	seedFlag := ctx.Option("seed")
@@ -154,6 +173,10 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		name := strings.TrimSuffix(base, ext)
 		// Handle raw .sql migrations
 		if ext == ".sql" {
+			if !includeRaw {
+				logger.Info().Msgf("Skipping raw SQL migration (enable with --include-raw=true): %s", path)
+				continue
+			}
 			if err := c.Driver.ApplySQLMigration(path); err != nil {
 				logger.Error().Err(err).Msgf("Failed to apply raw SQL migration %s", name)
 				if forceFlag {
@@ -165,120 +188,17 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		}
 
 		// Default: .bcl migration
-		data, err := readFile(path)
+		migrations, err := readMigrations(path)
 		if err != nil {
-			logger.Error().Err(err).Msgf("Failed to read migration file %s from path %s", name, path)
-			return fmt.Errorf("failed to read migration file %s: %w", name, err)
+			logger.Error().Err(err).Msgf("Failed to parse migration file %s", name)
+			return fmt.Errorf("failed to parse migration file %s: %w", name, err)
 		}
-		var cfg Config
-		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			logger.Error().Err(err).Msgf("Failed to unmarshal migration file %s", name)
-			return fmt.Errorf("failed to unmarshal migration file %s: %w", name, err)
+		if len(migrations) == 0 {
+			return fmt.Errorf("migration file %s contains no Migration blocks", name)
 		}
-		migration := cfg.Migration
-		if err := requireFields(migration.Name); err != nil {
-			logger.Error().Err(err).Msgf("Migration %s failed required field check", name)
-			return fmt.Errorf("MigrateCommand.Handle: %w", err)
-		}
-		if migration.Disable {
-			logger.Warn().Msgf("Migration '%s' is disabled. To enable it, set Disabled: false or remove the Disabled field.", migration.Name)
-			continue
-		}
-		for _, val := range migration.Validate {
-			if err := runPreUpChecks(val.PreUpChecks); err != nil {
-				logger.Error().Err(err).Msgf("Pre-up validation failed for migration %s", migration.Name)
-				return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
-			}
-		}
-		if err := c.Driver.ApplyMigration(migration); err != nil {
-			logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
-			if forceFlag {
-				continue
-			}
-			return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
-		}
-		for _, val := range migration.Validate {
-			if err := runPostUpChecks(val.PostUpChecks); err != nil {
-				logger.Error().Err(err).Msgf("Post-up validation failed for migration %s", migration.Name)
-				return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
-			}
-		}
-		// --- SEEDING LOGIC ---
-		if shouldSeed {
-			for _, ct := range migration.Up.CreateTable {
-				if err := requireFields(ct.Name); err != nil {
-					logger.Error().Err(err).Msgf("Seed generation: missing required table name in migration %s", name)
-					return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
-				}
-				seedDef := SeedDefinition{
-					Name:  "auto_seed_" + ct.Name,
-					Table: ct.Name,
-					Rows:  seedRows,
-				}
-				for _, col := range ct.AddFields {
-					if err := requireFields(col.Name); err != nil {
-						logger.Error().Err(err).Msgf("Seed generation: missing required field name in table %s (migration %s)", ct.Name, name)
-						return fmt.Errorf("MigrateCommand.Handle (seed field): %w", err)
-					}
-					if col.AutoIncrement || col.Nullable {
-						continue
-					}
-					fd := FieldDefinition{
-						Name:     col.Name,
-						DataType: col.Type,
-						Size:     col.Size,
-					}
-					if col.Default != nil {
-						switch v := (col.Default).(type) {
-						case string:
-							if v == "now()" || v == "CURRENT_TIMESTAMP" {
-								fd.Value = time.Now().Format(time.DateTime)
-							} else {
-								fd.Value = v
-							}
-						default:
-							fd.Value = v
-						}
-						seedDef.Fields = append(seedDef.Fields, fd)
-						continue
-					}
-					fakeFunc := "fake_string"
-					switch strings.ToLower(col.Type) {
-					case "int", "integer", "number", "smallint", "mediumint", "bigint", "tinyint":
-						fakeFunc = "fake_uint"
-					case "float", "double", "decimal", "numeric", "real":
-						fakeFunc = "fake_float64"
-					case "bool", "boolean":
-						fakeFunc = "fake_bool"
-					case "date":
-						fakeFunc = "fake_date"
-					case "datetime", "timestamp":
-						fakeFunc = "fake_datetime"
-					case "year":
-						fakeFunc = "fake_year"
-					default:
-						fakeFunc = "fake_string"
-						if col.Name == "status" {
-							fakeFunc = "fake_status"
-						}
-					}
-					fd.Value = fakeFunc
-					seedDef.Fields = append(seedDef.Fields, fd)
-				}
-				queries, err := seedDef.ToSQL(c.Driver.(*Manager).dialect)
-				if err != nil {
-					logger.Error().Msgf("Failed to generate seed SQL for table %s: %v", ct.Name, err)
-					return fmt.Errorf("failed to generate seed SQL for table %s: %w", ct.Name, err)
-				}
-				logger.Info().Msgf("Seeding table: %s", ct.Name)
-				for _, q := range queries {
-					logger.Info().Msgf("Seed SQL: %s", q.SQL)
-					err := c.Driver.(*Manager).dbDriver.ApplySQL([]string{q.SQL}, q.Args)
-					if err != nil {
-						logger.Error().Err(err).Msgf("Failed to apply seed SQL for table %s: %s", ct.Name, q.SQL)
-						return fmt.Errorf("failed to apply seed for table %s: %w", ct.Name, err)
-					}
-				}
+		for _, migration := range migrations {
+			if err := c.applyParsedMigration(migration, name, shouldSeed, seedRows, forceFlag); err != nil {
+				return err
 			}
 		}
 	}
@@ -341,6 +261,122 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(includeRaw bool) error {
 	if err := c.Driver.RunSeeds(false, includeRaw, files...); err != nil {
 		logger.Error().Err(err).Msg("Failed to run seed files after migration")
 		return fmt.Errorf("failed to apply seed files after migration: %w", err)
+	}
+	return nil
+}
+
+func (c *MigrateCommand) applyParsedMigration(migration Migration, fileName string, shouldSeed bool, seedRows int, forceFlag bool) error {
+	if err := requireFields(migration.Name); err != nil {
+		logger.Error().Err(err).Msgf("Migration %s failed required field check", fileName)
+		return fmt.Errorf("MigrateCommand.Handle: %w", err)
+	}
+	if migration.Disable {
+		logger.Warn().Msgf("Migration '%s' is disabled. To enable it, set Disabled: false or remove the Disabled field.", migration.Name)
+		return nil
+	}
+	for _, val := range migration.Validate {
+		if err := runPreUpChecks(val.PreUpChecks); err != nil {
+			logger.Error().Err(err).Msgf("Pre-up validation failed for migration %s", migration.Name)
+			return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
+		}
+	}
+	if err := c.Driver.ApplyMigration(migration); err != nil {
+		logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
+		if forceFlag {
+			return nil
+		}
+		return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
+	}
+	for _, val := range migration.Validate {
+		if err := runPostUpChecks(val.PostUpChecks); err != nil {
+			logger.Error().Err(err).Msgf("Post-up validation failed for migration %s", migration.Name)
+			return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
+		}
+	}
+	if shouldSeed {
+		return c.autoSeedCreatedTables(migration, fileName, seedRows)
+	}
+	return nil
+}
+
+func (c *MigrateCommand) autoSeedCreatedTables(migration Migration, fileName string, seedRows int) error {
+	mgr, ok := c.Driver.(*Manager)
+	if !ok {
+		return fmt.Errorf("automatic seeding requires *Manager driver")
+	}
+	for _, ct := range migration.Up.CreateTable {
+		if err := requireFields(ct.Name); err != nil {
+			logger.Error().Err(err).Msgf("Seed generation: missing required table name in migration %s", fileName)
+			return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
+		}
+		seedDef := SeedDefinition{
+			Name:  "auto_seed_" + ct.Name,
+			Table: ct.Name,
+			Rows:  seedRows,
+		}
+		for _, col := range ct.AddFields {
+			if err := requireFields(col.Name); err != nil {
+				logger.Error().Err(err).Msgf("Seed generation: missing required field name in table %s (migration %s)", ct.Name, fileName)
+				return fmt.Errorf("MigrateCommand.Handle (seed field): %w", err)
+			}
+			if col.AutoIncrement || col.Nullable {
+				continue
+			}
+			fd := FieldDefinition{
+				Name:     col.Name,
+				DataType: col.Type,
+				Size:     col.Size,
+			}
+			if col.Default != nil {
+				switch v := (col.Default).(type) {
+				case string:
+					if v == "now()" || v == "CURRENT_TIMESTAMP" {
+						fd.Value = time.Now().Format(time.DateTime)
+					} else {
+						fd.Value = v
+					}
+				default:
+					fd.Value = v
+				}
+				seedDef.Fields = append(seedDef.Fields, fd)
+				continue
+			}
+			fakeFunc := "fake_string"
+			switch strings.ToLower(col.Type) {
+			case "int", "integer", "number", "smallint", "mediumint", "bigint", "tinyint":
+				fakeFunc = "fake_uint"
+			case "float", "double", "decimal", "numeric", "real":
+				fakeFunc = "fake_float64"
+			case "bool", "boolean":
+				fakeFunc = "fake_bool"
+			case "date":
+				fakeFunc = "fake_date"
+			case "datetime", "timestamp":
+				fakeFunc = "fake_datetime"
+			case "year":
+				fakeFunc = "fake_year"
+			default:
+				fakeFunc = "fake_string"
+				if col.Name == "status" {
+					fakeFunc = "fake_status"
+				}
+			}
+			fd.Value = fakeFunc
+			seedDef.Fields = append(seedDef.Fields, fd)
+		}
+		queries, err := seedDef.ToSQL(mgr.dialect)
+		if err != nil {
+			logger.Error().Msgf("Failed to generate seed SQL for table %s: %v", ct.Name, err)
+			return fmt.Errorf("failed to generate seed SQL for table %s: %w", ct.Name, err)
+		}
+		logger.Info().Msgf("Seeding table: %s", ct.Name)
+		for _, q := range queries {
+			logger.Info().Msgf("Seed SQL: %s", q.SQL)
+			if err := mgr.dbDriver.ApplySQL([]string{q.SQL}, q.Args); err != nil {
+				logger.Error().Err(err).Msgf("Failed to apply seed SQL for table %s: %s", ct.Name, q.SQL)
+				return fmt.Errorf("failed to apply seed for table %s: %w", ct.Name, err)
+			}
+		}
 	}
 	return nil
 }

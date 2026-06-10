@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/expr"
 	"github.com/oarkflow/expr/vm"
 )
@@ -73,7 +72,7 @@ func (s SeedDefinition) ToSQL(dialect string) ([]InsertQuery, error) {
 	}
 	mutate := func(val string) string {
 		if strings.HasPrefix(val, "fake_") {
-			fn, ok := bcl.LookupFunction(val)
+			fn, ok := lookupSeedFunction(val)
 			if ok {
 				rs, err := fn()
 				if err == nil {

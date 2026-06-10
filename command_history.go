@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oarkflow/bcl"
 	"github.com/oarkflow/cli/contracts"
 )
 
@@ -82,15 +81,28 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 	// Recursively find all .bcl migration files except those in SeedDir.
 	var filePaths []string
 	var readFile func(string) ([]byte, error)
+	var readMigrations func(string) ([]Migration, error)
 	if mgr, ok := c.Driver.(*Manager); ok {
 		migrationMap, err := mgr.ListMigrationMap()
 		if err != nil {
 			return fmt.Errorf("failed to list migrations: %w", err)
 		}
+		seenPaths := make(map[string]struct{}, len(migrationMap))
 		for _, p := range migrationMap {
+			if _, ok := seenPaths[p]; ok {
+				continue
+			}
+			seenPaths[p] = struct{}{}
 			filePaths = append(filePaths, p)
 		}
 		readFile = mgr.readFile
+		readMigrations = func(path string) ([]Migration, error) {
+			cached, err := mgr.readMigrationsBCL(path)
+			if err != nil {
+				return nil, err
+			}
+			return cached.migrations, nil
+		}
 	} else {
 		seedDir := c.Driver.SeedDir()
 		err := filepath.Walk(c.Driver.MigrationDir(), func(path string, info os.FileInfo, err error) error {
@@ -116,35 +128,39 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 			return fmt.Errorf("failed to walk migration directory: %w", err)
 		}
 		readFile = os.ReadFile
+		readMigrations = func(path string) ([]Migration, error) {
+			data, err := readFile(path)
+			if err != nil {
+				return nil, err
+			}
+			return ParseMigrationsBCL(data)
+		}
 	}
 	// Sort by filename (timestamp prefix)
 	sort.Strings(filePaths)
 
 	objectSet := make(map[string]string)
 	for _, path := range filePaths {
-		data, err := readFile(path)
+		migrations, err := readMigrations(path)
 		if err != nil {
 			continue
 		}
-		var cfg Config
-		if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-			continue
-		}
-		m := cfg.Migration
-		for _, ct := range m.Up.CreateTable {
-			objectSet[strings.ToLower(ct.Name)] = "table"
-		}
-		for _, cv := range m.Up.CreateView {
-			objectSet[strings.ToLower(cv.Name)] = "view"
-		}
-		for _, cf := range m.Up.CreateFunction {
-			objectSet[strings.ToLower(cf.Name)] = "function"
-		}
-		for _, cp := range m.Up.CreateProcedure {
-			objectSet[strings.ToLower(cp.Name)] = "procedure"
-		}
-		for _, ct := range m.Up.CreateTrigger {
-			objectSet[strings.ToLower(ct.Name)] = "trigger"
+		for _, m := range migrations {
+			for _, ct := range m.Up.CreateTable {
+				objectSet[strings.ToLower(ct.Name)] = "table"
+			}
+			for _, cv := range m.Up.CreateView {
+				objectSet[strings.ToLower(cv.Name)] = "view"
+			}
+			for _, cf := range m.Up.CreateFunction {
+				objectSet[strings.ToLower(cf.Name)] = "function"
+			}
+			for _, cp := range m.Up.CreateProcedure {
+				objectSet[strings.ToLower(cp.Name)] = "procedure"
+			}
+			for _, ct := range m.Up.CreateTrigger {
+				objectSet[strings.ToLower(ct.Name)] = "trigger"
+			}
 		}
 	}
 
@@ -163,7 +179,7 @@ func (c *HistoryCommand) Handle(ctx contracts.Context) error {
 		allObjects = append(allObjects, objectInfo{Name: objectName, Type: typ})
 	}
 
-	report, err := generateHTMLReportAllObjectsTemplate(allObjects, filePaths, c.Driver.MigrationDir(), readFile)
+	report, err := generateHTMLReportAllObjectsTemplate(allObjects, filePaths, c.Driver.MigrationDir(), readMigrations)
 	if err != nil {
 		return err
 	}
@@ -312,7 +328,7 @@ func generateHTMLReportAllObjectsTemplate(
 	allObjects []objectInfo,
 	filePaths []string,
 	migrationDir string,
-	readFile func(string) ([]byte, error),
+	readMigrations func(string) ([]Migration, error),
 ) (string, error) {
 	reports := make(map[string]ObjectReport)
 	for _, obj := range allObjects {
@@ -328,243 +344,240 @@ func generateHTMLReportAllObjectsTemplate(
 		var migrationGroups []MigrationGroup
 
 		for _, path := range filePaths {
-			data, err := readFile(path)
+			migrations, err := readMigrations(path)
 			if err != nil {
 				continue
 			}
-			var cfg Config
-			if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-				continue
-			}
-			m := cfg.Migration
 			createdAt := extractTimeFromFilename(filepath.Base(path))
+			for _, m := range migrations {
 
-			// TABLES
-			for _, ct := range m.Up.CreateTable {
-				if strings.EqualFold(ct.Name, obj.Name) {
-					// Sort fields for CreateTable in history
-					sortedCT := ct
-					sortedCT.AddFields = sortFieldsPriority(sortedCT.AddFields)
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "CreateTable",
-						Details:       "",
-						CreateTable:   &sortedCT,
-					})
-					cpy := sortedCT
-					finalTable = &cpy
-					dropped = false
-				}
-			}
-			for _, at := range m.Up.AlterTable {
-				if strings.EqualFold(at.Name, obj.Name) && finalTable != nil && !dropped {
-					for _, ac := range at.AddFields {
+				// TABLES
+				for _, ct := range m.Up.CreateTable {
+					if strings.EqualFold(ct.Name, obj.Name) {
+						// Sort fields for CreateTable in history
+						sortedCT := ct
+						sortedCT.AddFields = sortFieldsPriority(sortedCT.AddFields)
 						changes = append(changes, MigrationChange{
 							MigrationName: m.Name,
 							Date:          createdAt,
-							Operation:     "AddField",
+							Operation:     "CreateTable",
 							Details:       "",
-							Field:         &ac,
+							CreateTable:   &sortedCT,
 						})
-						finalTable.AddFields = append(finalTable.AddFields, ac)
-						finalTable.AddFields = sortFieldsPriority(finalTable.AddFields)
+						cpy := sortedCT
+						finalTable = &cpy
+						dropped = false
 					}
-					for _, dc := range at.DropFields {
-						changes = append(changes, MigrationChange{
-							MigrationName: m.Name,
-							Date:          createdAt,
-							Operation:     "DropField",
-							Details:       "",
-							DropField:     &dc,
-						})
-						var newCols []AddField
-						for _, col := range finalTable.AddFields {
-							if col.Name != dc.Name {
-								newCols = append(newCols, col)
-							}
+				}
+				for _, at := range m.Up.AlterTable {
+					if strings.EqualFold(at.Name, obj.Name) && finalTable != nil && !dropped {
+						for _, ac := range at.AddFields {
+							changes = append(changes, MigrationChange{
+								MigrationName: m.Name,
+								Date:          createdAt,
+								Operation:     "AddField",
+								Details:       "",
+								Field:         &ac,
+							})
+							finalTable.AddFields = append(finalTable.AddFields, ac)
+							finalTable.AddFields = sortFieldsPriority(finalTable.AddFields)
 						}
-						finalTable.AddFields = sortFieldsPriority(newCols)
+						for _, dc := range at.DropFields {
+							changes = append(changes, MigrationChange{
+								MigrationName: m.Name,
+								Date:          createdAt,
+								Operation:     "DropField",
+								Details:       "",
+								DropField:     &dc,
+							})
+							var newCols []AddField
+							for _, col := range finalTable.AddFields {
+								if col.Name != dc.Name {
+									newCols = append(newCols, col)
+								}
+							}
+							finalTable.AddFields = sortFieldsPriority(newCols)
+						}
+						for _, rc := range at.RenameFields {
+							changes = append(changes, MigrationChange{
+								MigrationName: m.Name,
+								Date:          createdAt,
+								Operation:     "RenameField",
+								Details:       "",
+								RenameField:   &rc,
+							})
+							for i, col := range finalTable.AddFields {
+								if col.Name == rc.From {
+									finalTable.AddFields[i].Name = rc.To
+								}
+							}
+							finalTable.AddFields = sortFieldsPriority(finalTable.AddFields)
+						}
 					}
-					for _, rc := range at.RenameFields {
+				}
+				for _, dt := range m.Up.DropTable {
+					if strings.EqualFold(dt.Name, obj.Name) {
 						changes = append(changes, MigrationChange{
 							MigrationName: m.Name,
 							Date:          createdAt,
-							Operation:     "RenameField",
+							Operation:     "DropTable",
 							Details:       "",
-							RenameField:   &rc,
 						})
-						for i, col := range finalTable.AddFields {
-							if col.Name == rc.From {
-								finalTable.AddFields[i].Name = rc.To
-							}
+						finalTable = nil
+						dropped = true
+					}
+				}
+				// VIEWS
+				for _, cv := range m.Up.CreateView {
+					if strings.EqualFold(cv.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "CreateView",
+							Details:       "",
+							CreateView:    &cv,
+						})
+						cpy := cv
+						finalView = &cpy
+					}
+				}
+				for _, dv := range m.Up.DropView {
+					if strings.EqualFold(dv.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "DropView",
+							Details:       "",
+						})
+						finalView = nil
+					}
+				}
+				for _, rv := range m.Up.RenameView {
+					if strings.EqualFold(rv.OldName, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "RenameView",
+							Details:       "",
+							RenameField:   nil, // Not used for views
+						})
+						if finalView != nil {
+							finalView.Name = rv.NewName
 						}
-						finalTable.AddFields = sortFieldsPriority(finalTable.AddFields)
 					}
 				}
-			}
-			for _, dt := range m.Up.DropTable {
-				if strings.EqualFold(dt.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "DropTable",
-						Details:       "",
-					})
-					finalTable = nil
-					dropped = true
-				}
-			}
-			// VIEWS
-			for _, cv := range m.Up.CreateView {
-				if strings.EqualFold(cv.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "CreateView",
-						Details:       "",
-						CreateView:    &cv,
-					})
-					cpy := cv
-					finalView = &cpy
-				}
-			}
-			for _, dv := range m.Up.DropView {
-				if strings.EqualFold(dv.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "DropView",
-						Details:       "",
-					})
-					finalView = nil
-				}
-			}
-			for _, rv := range m.Up.RenameView {
-				if strings.EqualFold(rv.OldName, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "RenameView",
-						Details:       "",
-						RenameField:   nil, // Not used for views
-					})
-					if finalView != nil {
-						finalView.Name = rv.NewName
+				// FUNCTIONS
+				for _, cf := range m.Up.CreateFunction {
+					if strings.EqualFold(cf.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName:  m.Name,
+							Date:           createdAt,
+							Operation:      "CreateFunction",
+							Details:        "",
+							CreateFunction: &cf,
+						})
+						cpy := cf
+						finalFunction = &cpy
 					}
 				}
-			}
-			// FUNCTIONS
-			for _, cf := range m.Up.CreateFunction {
-				if strings.EqualFold(cf.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName:  m.Name,
-						Date:           createdAt,
-						Operation:      "CreateFunction",
-						Details:        "",
-						CreateFunction: &cf,
-					})
-					cpy := cf
-					finalFunction = &cpy
-				}
-			}
-			for _, df := range m.Up.DropFunction {
-				if strings.EqualFold(df.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "DropFunction",
-						Details:       "",
-					})
-					finalFunction = nil
-				}
-			}
-			for _, rf := range m.Up.RenameFunction {
-				if strings.EqualFold(rf.OldName, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "RenameFunction",
-						Details:       "",
-					})
-					if finalFunction != nil {
-						finalFunction.Name = rf.NewName
+				for _, df := range m.Up.DropFunction {
+					if strings.EqualFold(df.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "DropFunction",
+							Details:       "",
+						})
+						finalFunction = nil
 					}
 				}
-			}
-			// PROCEDURES
-			for _, cp := range m.Up.CreateProcedure {
-				if strings.EqualFold(cp.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName:   m.Name,
-						Date:            createdAt,
-						Operation:       "CreateProcedure",
-						Details:         "",
-						CreateProcedure: &cp,
-					})
-					cpy := cp
-					finalProcedure = &cpy
-				}
-			}
-			for _, dp := range m.Up.DropProcedure {
-				if strings.EqualFold(dp.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "DropProcedure",
-						Details:       "",
-					})
-					finalProcedure = nil
-				}
-			}
-			for _, rp := range m.Up.RenameProcedure {
-				if strings.EqualFold(rp.OldName, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "RenameProcedure",
-						Details:       "",
-					})
-					if finalProcedure != nil {
-						finalProcedure.Name = rp.NewName
+				for _, rf := range m.Up.RenameFunction {
+					if strings.EqualFold(rf.OldName, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "RenameFunction",
+							Details:       "",
+						})
+						if finalFunction != nil {
+							finalFunction.Name = rf.NewName
+						}
 					}
 				}
-			}
-			// TRIGGERS
-			for _, ct := range m.Up.CreateTrigger {
-				if strings.EqualFold(ct.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "CreateTrigger",
-						Details:       "",
-						CreateTrigger: &ct,
-					})
-					cpy := ct
-					finalTrigger = &cpy
+				// PROCEDURES
+				for _, cp := range m.Up.CreateProcedure {
+					if strings.EqualFold(cp.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName:   m.Name,
+							Date:            createdAt,
+							Operation:       "CreateProcedure",
+							Details:         "",
+							CreateProcedure: &cp,
+						})
+						cpy := cp
+						finalProcedure = &cpy
+					}
 				}
-			}
-			for _, dt := range m.Up.DropTrigger {
-				if strings.EqualFold(dt.Name, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "DropTrigger",
-						Details:       "",
-					})
-					finalTrigger = nil
+				for _, dp := range m.Up.DropProcedure {
+					if strings.EqualFold(dp.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "DropProcedure",
+							Details:       "",
+						})
+						finalProcedure = nil
+					}
 				}
-			}
-			for _, rt := range m.Up.RenameTrigger {
-				if strings.EqualFold(rt.OldName, obj.Name) {
-					changes = append(changes, MigrationChange{
-						MigrationName: m.Name,
-						Date:          createdAt,
-						Operation:     "RenameTrigger",
-						Details:       "",
-					})
-					if finalTrigger != nil {
-						finalTrigger.Name = rt.NewName
+				for _, rp := range m.Up.RenameProcedure {
+					if strings.EqualFold(rp.OldName, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "RenameProcedure",
+							Details:       "",
+						})
+						if finalProcedure != nil {
+							finalProcedure.Name = rp.NewName
+						}
+					}
+				}
+				// TRIGGERS
+				for _, ct := range m.Up.CreateTrigger {
+					if strings.EqualFold(ct.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "CreateTrigger",
+							Details:       "",
+							CreateTrigger: &ct,
+						})
+						cpy := ct
+						finalTrigger = &cpy
+					}
+				}
+				for _, dt := range m.Up.DropTrigger {
+					if strings.EqualFold(dt.Name, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "DropTrigger",
+							Details:       "",
+						})
+						finalTrigger = nil
+					}
+				}
+				for _, rt := range m.Up.RenameTrigger {
+					if strings.EqualFold(rt.OldName, obj.Name) {
+						changes = append(changes, MigrationChange{
+							MigrationName: m.Name,
+							Date:          createdAt,
+							Operation:     "RenameTrigger",
+							Details:       "",
+						})
+						if finalTrigger != nil {
+							finalTrigger.Name = rt.NewName
+						}
 					}
 				}
 			}

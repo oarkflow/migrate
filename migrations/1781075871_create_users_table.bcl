@@ -1,0 +1,43 @@
+Migration "1781075871_create_users_table" {
+			Version = "1.0.0"
+			Description = "Create table users."
+			Connection = "default"
+			Up {
+				 CreateTable "users" {
+				   Field "id" {
+				     type = "integer"
+				     primary_key = true
+				     auto_increment = true
+				     index = true
+				     unique = true
+				   }
+				   Field "is_active" {
+				     type = "boolean"
+				     default = false
+				   }
+				   Field "status" {
+				     type = "string"
+				     size = 20
+				     default = "active"
+				   }
+				   Field "created_at" {
+				     type = "datetime"
+				     default = "now()"
+				   }
+				   Field "updated_at" {
+				     type = "datetime"
+				     default = "now()"
+				   }
+				   Field "deleted_at" {
+				     type = "datetime"
+				     nullable = true
+				   }
+				 }
+			}
+			Down {
+				 DropTable "users" {
+				   Cascade = true
+				 }
+			}
+	}
+	

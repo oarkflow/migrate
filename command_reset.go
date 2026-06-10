@@ -25,10 +25,27 @@ func (c *ResetCommand) Extend() contracts.Extend {
 				Usage:   "Enable verbose output",
 				Value:   "false",
 			},
+			{
+				Name:    "force",
+				Aliases: []string{"f"},
+				Usage:   "Force reset ignoring rollback statement errors",
+				Value:   "false",
+			},
 		},
 	}
 }
 
 func (c *ResetCommand) Handle(ctx contracts.Context) error {
+	verbose := ctx.Option("v") != "" && ctx.Option("v") != "false"
+	forceFlag := ctx.Option("f") != "" && ctx.Option("f") != "false"
+	if mgr, ok := c.Driver.(*Manager); ok {
+		mgr.Verbose = verbose
+		if forceFlag {
+			mgr.Force = true
+			if mgr.dbDriver != nil {
+				mgr.dbDriver.SetForce(true)
+			}
+		}
+	}
 	return c.Driver.ResetMigrations()
 }

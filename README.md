@@ -134,9 +134,13 @@ When `WithEmbeddedFiles` is used the tool will list and read migrations from the
 
 ### Migration Commands
 - **`make:migration <name>`** - Create a new migration file
-- **`migrate`** - Apply all pending migrations
+- **`make:migration <name> --raw=true`** - Create a raw SQL migration file
+- **`migrate`** - Apply all pending BCL migrations
+- **`migrate --include-raw=true`** - Apply pending BCL and raw SQL migrations
 - **`migration:rollback --step=<n>`** - Rollback n migrations
-- **`migration:reset`** - Reset all migrations
+- **`migration:rollback --step=<n> --force=true`** - Rollback and continue past statement errors
+- **`migration:reset`** - Reset all migrations by running down operations
+- **`migration:reset --force=true`** - Reset and continue past rollback statement errors
 - **`migration:validate`** - Validate migration files
 - **`status`** - Show migration status
 
@@ -361,6 +365,39 @@ Inside `Up` / `Down` you can use the following operations (short description):
 
 ---
 
+### Raw SQL migrations
+
+Use raw SQL migrations when you need hand-written SQL, vendor-specific features, or statements not represented by BCL operations.
+
+Create one with:
+
+```bash
+go run main.go cli make:migration add_user_indexes --raw=true
+```
+
+Raw migration files must use section comments:
+
+```sql
+-- migration-up
+CREATE INDEX idx_users_email ON users (email);
+
+-- migration-down
+DROP INDEX IF EXISTS idx_users_email;
+```
+
+Rules:
+
+- `-- migration-up` or `-- migrate-up` starts the apply section.
+- `-- migration-down` or `-- migrate-down` starts the rollback section.
+- `migrate` skips raw SQL migrations by default.
+- `migrate --include-raw=true` executes the up section and stores history/checksum.
+- `migration:rollback` and `migration:reset` execute only the down section.
+- `migration:validate` requires a non-empty up section.
+- Missing down SQL or rollback statement failures stop rollback/reset unless `--force=true` is used.
+- Raw SQL files and BCL files can be mixed in the same migration directory; execution order is deterministic by filename, and history order controls rollback/reset.
+
+---
+
 ### CreateTable
 
 `CreateTable "name" { Field ... PrimaryKey = [ ... ] }`
@@ -511,6 +548,9 @@ AlterTable "users" {
 ## 🌱 Seed Syntax Reference ✅
 
 Seed files follow a `Seed "name" { ... }` structure.
+With BCL v0.0.25 and later, a single `.bcl` file may contain multiple root
+`Migration` blocks or multiple root `Seed` blocks; migrate applies them in file
+order after sorting migration files by name.
 
 Seed fields:
 
@@ -1115,6 +1155,25 @@ Migration "1665678901_create_users_table" {
 }
 ```
 
+### Create a Raw SQL Migration File
+Command:
+```
+$ go run main.go cli make:migration create_users_table --raw=true
+```
+This creates a `.sql` migration with explicit up/down sections:
+```sql
+-- migration-up
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  email TEXT NOT NULL
+);
+
+-- migration-down
+DROP TABLE IF EXISTS users;
+```
+
+Raw SQL migrations are applied only when you pass `--include-raw=true` to `migrate`. The `-- migration-up` section is required; `migration:validate` fails if it is missing or empty. The `-- migration-down` section is required for normal rollback/reset. If you intentionally want to remove history without a down section, use `--force=true`.
+
 ### Create a New Seed File
 Command:
 ```
@@ -1156,7 +1215,7 @@ Command:
 $ go run main.go cli migrate --seed=true --rows=10
 ```
 This runs all pending migrations and seeds tables with 10 rows each.
-To additionally execute raw `.sql` seed files located in your seed directory, append `--include-raw=true` to the command.
+To additionally execute raw `.sql` migrations and raw `.sql` seed files located in your seed directory, append `--include-raw=true` to the command.
 
 ### Run Seeds
 Command:
@@ -1170,12 +1229,14 @@ Command (rollback last migration):
 ```
 $ go run main.go cli migration:rollback --step=1
 ```
+Rollback supports both `.bcl` and raw `.sql` migrations. For raw SQL, the tool executes the `-- migration-down` section. Rollback fails on missing down SQL or statement errors unless `--force=true` is provided.
 
 ### Reset Migrations
 Command:
 ```
 $ go run main.go cli migration:reset
 ```
+Reset rolls back all applied migrations in reverse history order. It supports mixed `.bcl` and raw `.sql` histories. Use `--force=true` only when you explicitly want reset to continue after rollback errors.
 
 ### Validate Migration History
 Command:

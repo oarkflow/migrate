@@ -4,8 +4,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/oarkflow/bcl"
-
 	"github.com/oarkflow/migrate"
 )
 
@@ -14,12 +12,11 @@ func ma2in() {
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)
 	}
-	var cfg migrate.Config
-	if _, err := bcl.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("Failed to unmarshal migration file: %v", err)
+	mig, err := migrate.ParseMigrationBCL(data)
+	if err != nil {
+		log.Fatalf("Failed to parse migration file: %v", err)
 	}
 	dialect := "sqlite"
-	mig := cfg.Migration
 	upQueries, err := mig.ToSQL(dialect, true)
 	if err != nil {
 		log.Fatalf("Error generating SQL for up migration '%s': %v", mig.Name, err)
