@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -24,10 +25,10 @@ func NewPostgresDriverFromDB(db *squealx.DB) *PostgresDriver {
 func NewPostgresDriver(dsn string) (*PostgresDriver, error) {
 	db, err := postgres.Open(dsn, "postgres")
 	if err != nil {
-		return nil, fmt.Errorf("failed to open connection: %w", err)
+		return nil, fmt.Errorf("failed to open connection to %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
 	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		return nil, fmt.Errorf("failed to ping database %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
 	return &PostgresDriver{db: db}, nil
 }
@@ -88,8 +89,16 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 		return nil
 	}
 
-	// Force mode: execute each statement individually without transaction, log errors and continue
+	// Force mode: Postgres aborts the whole transaction on the first error
+	// within it (it cannot continue using a transaction once a statement has
+	// failed), so to honor "keep applying the rest of the statements" we run
+	// each statement in its own implicit transaction instead of one shared
+	// transaction. Every failure is tracked and surfaced: force mode must
+	// never report success when a statement actually failed, so the caller
+	// (and migration history) see an accurate, honest result.
 	if p.Force {
+		var failures []error
+		applied := 0
 		for _, q := range stmts {
 			q = strings.TrimSpace(q)
 			if q == "" {
@@ -103,7 +112,13 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 			}
 			if err != nil {
 				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
+				failures = append(failures, fmt.Errorf("statement failed [%s]: %w", q, err))
+				continue
 			}
+			applied++
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("force mode: %d/%d statements applied, %d failed: %w", applied, len(stmts), len(failures), errors.Join(failures...))
 		}
 		return nil
 	}

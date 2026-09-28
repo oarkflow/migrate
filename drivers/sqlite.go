@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -24,10 +25,13 @@ func NewSQLiteDriverFromDB(db *squealx.DB) *SQLiteDriver {
 func NewSQLiteDriver(dbPath string) (*SQLiteDriver, error) {
 	db, err := sqlite.Open(dbPath, "sqlite3")
 	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+		// SQLite paths/DSNs don't normally carry credentials, but redact
+		// defensively in case a connection-string style path (e.g. a
+		// "file:...?_auth_user=...&_auth_pass=..." DSN) is used.
+		return nil, fmt.Errorf("failed to open sqlite database %s: %w", redactDSN(dbPath), errors.New(redactDSN(err.Error())))
 	}
 	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
+		return nil, fmt.Errorf("failed to ping sqlite database %s: %w", redactDSN(dbPath), errors.New(redactDSN(err.Error())))
 	}
 	return &SQLiteDriver{db: db}, nil
 }
@@ -47,8 +51,16 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 		return nil
 	}
 
-	// Force mode: execute each statement individually without transaction, log errors and continue
+	// Force mode: SQLite fully supports transactional DDL, but "force" means
+	// keep applying statements past an error rather than aborting the whole
+	// migration, so we still execute each statement individually (a shared
+	// transaction would otherwise be poisoned by the first failure). Every
+	// failure is tracked and surfaced: force mode must never report success
+	// when a statement actually failed, so the caller (and migration
+	// history) see an accurate, honest result.
 	if s.Force {
+		var failures []error
+		applied := 0
 		for _, q := range stmts {
 			q = strings.TrimSpace(q)
 			if q == "" {
@@ -62,7 +74,13 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 			}
 			if err != nil {
 				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
+				failures = append(failures, fmt.Errorf("statement failed [%s]: %w", q, err))
+				continue
 			}
+			applied++
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("force mode: %d/%d statements applied, %d failed: %w", applied, len(stmts), len(failures), errors.Join(failures...))
 		}
 		return nil
 	}
