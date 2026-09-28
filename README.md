@@ -36,6 +36,52 @@ A powerful, flexible database migration tool for Go applications that supports m
 go get github.com/oarkflow/migrate
 ```
 
+## ⬆️ Upgrading
+
+### Breaking change: `context.Context` is now required throughout the library
+
+If you use the `migrator` CLI binary only, **nothing changes for you** — `migrator cli migrate` and friends work exactly as before. The CLI now builds its own root context internally (cancelled cleanly on Ctrl+C/SIGTERM), so no action is needed.
+
+If you import `github.com/oarkflow/migrate` as a library, every method that touches the database (or could block) now takes a `context.Context` as its first parameter, with no backward-compatible shim. Update call sites as follows:
+
+| Before | After |
+|---|---|
+| `manager.Run(client)` | `manager.Run(ctx, client)` |
+| `manager.ApplyMigration(m)` | `manager.ApplyMigration(ctx, m)` |
+| `manager.ApplySQLMigration(path)` | `manager.ApplySQLMigration(ctx, path)` |
+| `manager.RollbackMigration(step)` | `manager.RollbackMigration(ctx, step)` |
+| `manager.ResetMigrations()` | `manager.ResetMigrations(ctx)` |
+| `manager.ValidateMigrations()` | `manager.ValidateMigrations(ctx)` |
+| `manager.CreateMigrationFile(name, raw)` | `manager.CreateMigrationFile(ctx, name, raw)` |
+| `manager.CreateSeedFile(name, raw)` | `manager.CreateSeedFile(ctx, name, raw)` |
+| `manager.ValidateHistoryStorage()` | `manager.ValidateHistoryStorage(ctx)` |
+| `manager.RunSeeds(truncate, includeRaw, files...)` | `manager.RunSeeds(ctx, truncate, includeRaw, files...)` |
+| `migrate.NewManagerFromConfig(path, opts...)` | `migrate.NewManagerFromConfig(ctx, path, opts...)` |
+| `migrate.NewDriver(driver, dsn)` | `migrate.NewDriver(ctx, driver, dsn)` |
+| `drivers.NewPostgresDriver(dsn)` / `NewMySQLDriver` / `NewSQLiteDriver` | same, with `ctx` first |
+| `historyDriver.Save/Load/ValidateStorage/Rollback(...)` | same, with `ctx` first |
+
+Custom `IDatabaseDriver` or `HistoryDriver` implementations must add `ctx context.Context` as the first parameter to every interface method to keep satisfying the interface.
+
+A root context is normally created once at your program's entry point, e.g.:
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+
+manager, err := migrate.NewManagerFromConfig(ctx, "migrate.json")
+if err != nil {
+    log.Fatal(err)
+}
+if err := manager.ApplyMigration(ctx, migration); err != nil {
+    log.Fatal(err)
+}
+```
+
+`config.Database.Timeout` (in `migrate.json`) now actually enforces a connect deadline via this context, rather than only appearing in `config:show` output.
+
+This is a semver-major change if you consume this module as a versioned dependency — pin to the last pre-context tag if you're not ready to update call sites yet.
+
 ## 🛠️ Quick Start
 
 ### 1. Initialize Configuration
