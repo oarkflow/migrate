@@ -247,7 +247,134 @@ func ParseMigrationsBCL(data []byte) ([]Migration, error) {
 		seen[migration.Name] = struct{}{}
 		migrations = append(migrations, migration)
 	}
+	patchDeclaredFieldTypes(data, migrations)
 	return migrations, nil
+}
+
+// patchDeclaredFieldTypes works around a bug in github.com/oarkflow/bcl's
+// generic struct decoder: blockBodyWithID (encoding.go) unconditionally strips
+// any "type" key from a block's body before tag-based decoding, because it
+// conflates a user attribute literally named "type" with the block's own
+// meta type discriminator. This silently drops every `type = "..."` attribute
+// on Field/AddField/RenameField blocks, so bclAddField.Type (and
+// bclRenameField.Type) always decode to "". We recover the real value by
+// walking the raw AST (bcl.Parse), which is not subject to that stripping,
+// and patch it back into the already-decoded migrations.
+func patchDeclaredFieldTypes(data []byte, migrations []Migration) {
+	declared := extractDeclaredFieldTypes(data)
+	if len(declared) == 0 {
+		return
+	}
+	for i := range migrations {
+		m := &migrations[i]
+		byOp, ok := declared[m.Name]
+		if !ok {
+			continue
+		}
+		patchOperationFieldTypes(&m.Up, byOp["Up"])
+		patchOperationFieldTypes(&m.Down, byOp["Down"])
+	}
+}
+
+// extractDeclaredFieldTypes returns migrationName -> "Up"/"Down" -> tableName -> fieldName -> type.
+func extractDeclaredFieldTypes(data []byte) map[string]map[string]map[string]map[string]string {
+	result := make(map[string]map[string]map[string]map[string]string)
+	doc, err := bcl.Parse(data)
+	if err != nil {
+		return result
+	}
+	for _, item := range doc.Items {
+		migBlock, ok := item.(*bcl.Block)
+		if !ok || migBlock.Type != "Migration" {
+			continue
+		}
+		for _, opNode := range migBlock.Body {
+			opBlock, ok := opNode.(*bcl.Block)
+			if !ok || (opBlock.Type != "Up" && opBlock.Type != "Down") {
+				continue
+			}
+			tables := extractTableFieldTypes(opBlock)
+			if len(tables) == 0 {
+				continue
+			}
+			if result[migBlock.ID] == nil {
+				result[migBlock.ID] = make(map[string]map[string]map[string]string)
+			}
+			result[migBlock.ID][opBlock.Type] = tables
+		}
+	}
+	return result
+}
+
+func extractTableFieldTypes(opBlock *bcl.Block) map[string]map[string]string {
+	tables := make(map[string]map[string]string)
+	for _, n := range opBlock.Body {
+		tblBlock, ok := n.(*bcl.Block)
+		if !ok || (tblBlock.Type != "CreateTable" && tblBlock.Type != "AlterTable") {
+			continue
+		}
+		fields := make(map[string]string)
+		for _, fn := range tblBlock.Body {
+			fieldBlock, ok := fn.(*bcl.Block)
+			if !ok || (fieldBlock.Type != "Field" && fieldBlock.Type != "AddField" && fieldBlock.Type != "RenameField") {
+				continue
+			}
+			for _, an := range fieldBlock.Body {
+				assign, ok := an.(*bcl.Assignment)
+				if !ok || assign.Name != "type" {
+					continue
+				}
+				if s, ok := assign.Value.ToInterface(false).(string); ok && s != "" {
+					fields[fieldBlock.ID] = s
+				}
+			}
+		}
+		if len(fields) > 0 {
+			tables[tblBlock.ID] = fields
+		}
+	}
+	return tables
+}
+
+func patchOperationFieldTypes(op *Operation, tables map[string]map[string]string) {
+	if tables == nil {
+		return
+	}
+	for i := range op.CreateTable {
+		ct := &op.CreateTable[i]
+		fields := tables[ct.Name]
+		if fields == nil {
+			continue
+		}
+		for j := range ct.AddFields {
+			if ct.AddFields[j].Type == "" {
+				if t, ok := fields[ct.AddFields[j].Name]; ok {
+					ct.AddFields[j].Type = t
+				}
+			}
+		}
+	}
+	for i := range op.AlterTable {
+		at := &op.AlterTable[i]
+		fields := tables[at.Name]
+		if fields == nil {
+			continue
+		}
+		for j := range at.AddFields {
+			if at.AddFields[j].Type == "" {
+				if t, ok := fields[at.AddFields[j].Name]; ok {
+					at.AddFields[j].Type = t
+				}
+			}
+		}
+		for j := range at.RenameFields {
+			if at.RenameFields[j].Type == "" {
+				if t, ok := fields[at.RenameFields[j].Name]; ok {
+					at.RenameFields[j].Type = t
+				}
+			}
+		}
+	}
 }
 
 func ParseMigrationBCL(data []byte) (Migration, error) {
