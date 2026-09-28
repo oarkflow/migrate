@@ -193,7 +193,7 @@ func (p *PostgresDriver) isIgnorableError(err error) bool {
 		strings.Contains(errStr, "42703") || // undefined_column
 		strings.Contains(errStr, "42883") || // undefined_function
 		strings.Contains(errStr, "42p02") || // undefined_parameter
-		strings.Contains(errStr, "2bp01")    // dependent_objects_still_exist (during rollback, ignore)
+		strings.Contains(errStr, "2bp01") // dependent_objects_still_exist (during rollback, ignore)
 }
 
 func (p *PostgresDriver) DB() *squealx.DB {

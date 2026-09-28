@@ -165,5 +165,5 @@ func (m *MySQLDriver) isIgnorableError(err error) bool {
 		strings.Contains(errStr, "error 1051") || // unknown table
 		strings.Contains(errStr, "error 1054") || // unknown column
 		strings.Contains(errStr, "error 1217") || // foreign key constraint fails (during rollback, ignore)
-		strings.Contains(errStr, "error 1451")    // cannot delete or update a parent row (during rollback, ignore)
+		strings.Contains(errStr, "error 1451") // cannot delete or update a parent row (during rollback, ignore)
 }

@@ -157,6 +157,7 @@ func (s *SQLiteDriver) ApplySQL(ctx context.Context, migrations []string, args .
 func (m *SQLiteDriver) DB() *squealx.DB {
 	return m.db
 }
+
 // isIgnorableError checks if an error can be safely ignored during rollback operations
 func (s *SQLiteDriver) isIgnorableError(err error) bool {
 	errStr := strings.ToLower(err.Error())
