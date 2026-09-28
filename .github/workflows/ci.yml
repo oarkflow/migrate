@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, Vet, Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+          cache: true
+
+      - name: Go build
+        run: go build ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test
+        # NOTE: drivers/mysql_integration_test.go and drivers/postgres_integration_test.go
+        # are gated behind TEST_MYSQL_DSN / TEST_POSTGRES_DSN env vars. Those are
+        # intentionally left unset here so the integration tests skip cleanly and no
+        # real MySQL/Postgres server is required in CI.
+        run: go test ./... -v
+
+  lint:
+    name: golangci-lint (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        continue-on-error: true
+        with:
+          version: latest
+          args: --timeout=5m
