@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -34,7 +35,7 @@ var logger = log.Logger{
 }
 
 type IDatabaseDriver interface {
-	ApplySQL(queries []string, args ...any) error
+	ApplySQL(ctx context.Context, queries []string, args ...any) error
 	DB() *squealx.DB
 	SetForce(force bool)
 }
@@ -42,19 +43,28 @@ type IDatabaseDriver interface {
 type IManager interface {
 	MigrationDir() string
 	SeedDir() string
-	ApplyMigration(m Migration) error
+	// Context returns the root context.Context the manager was started with.
+	// CLI commands use it because contracts.Command.Handle only receives the
+	// CLI framework's own contracts.Context, which is unrelated to
+	// context.Context and has no room to carry one.
+	Context() context.Context
+	ApplyMigration(ctx context.Context, m Migration) error
 	// ApplySQLMigration applies a raw .sql migration file specified by path
-	ApplySQLMigration(path string) error
-	RollbackMigration(step int) error
-	ResetMigrations() error
-	ValidateMigrations() error
-	CreateMigrationFile(name string, raw bool) error
-	CreateSeedFile(name string, raw bool) error
-	ValidateHistoryStorage() error
-	RunSeeds(truncate bool, includeRaw bool, seedFile ...string) error
+	ApplySQLMigration(ctx context.Context, path string) error
+	RollbackMigration(ctx context.Context, step int) error
+	ResetMigrations(ctx context.Context) error
+	ValidateMigrations(ctx context.Context) error
+	CreateMigrationFile(ctx context.Context, name string, raw bool) error
+	CreateSeedFile(ctx context.Context, name string, raw bool) error
+	ValidateHistoryStorage(ctx context.Context) error
+	RunSeeds(ctx context.Context, truncate bool, includeRaw bool, seedFile ...string) error
 }
 
 type Manager struct {
+	// ctx is the root context the manager runs under. It is set by Run (from
+	// the process-wide signal-aware context) or WithContext, and is what the
+	// CLI commands hand back down into the DB-touching methods.
+	ctx           context.Context
 	migrationDir  string
 	seedDir       string
 	dialect       string
@@ -89,6 +99,17 @@ type cachedSeedsBCL struct {
 }
 
 type ManagerOption func(*Manager)
+
+// WithContext sets the root context the manager (and everything it calls
+// into) runs under. Options that connect to the database, such as WithConfig,
+// use it, so pass it before those options.
+func WithContext(ctx context.Context) ManagerOption {
+	return func(m *Manager) {
+		if ctx != nil {
+			m.ctx = ctx
+		}
+	}
+}
 
 func WithMigrationDir(dir string) ManagerOption {
 	return func(m *Manager) {
@@ -154,12 +175,14 @@ func WithConfig(config *MigrateConfig) ManagerOption {
 		if normalizedDriver != "" && config.Database.Database != "" {
 			dsn := config.GetDSN()
 			if dsn != "" {
-				driver, err := NewDriver(normalizedDriver, dsn)
+				connectCtx, cancel := config.ConnectContext(m.Context())
+				defer cancel()
+				driver, err := NewDriver(connectCtx, normalizedDriver, dsn)
 				if err == nil {
 					m.dbDriver = driver
 
 					// Set up history driver
-					historyDriver, err := NewHistoryDriver("db", normalizedDriver, dsn, config.Migration.TableName)
+					historyDriver, err := NewHistoryDriver(connectCtx, "db", normalizedDriver, dsn, config.Migration.TableName)
 					if err == nil {
 						m.historyDriver = historyDriver
 					} else {
@@ -190,6 +213,7 @@ func WithClient(client contracts.Cli) ManagerOption {
 
 func defaultManager() *Manager {
 	return &Manager{
+		ctx:           context.Background(),
 		migrationDir:  "migrations",
 		seedDir:       "migrations/seeds",
 		dialect:       "postgres",
@@ -231,7 +255,10 @@ func GetCommands(m *Manager) []contracts.Command {
 }
 
 // NewManagerFromConfig creates a new manager from configuration file
-func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, error) {
+func NewManagerFromConfig(ctx context.Context, configPath string, opts ...ManagerOption) (*Manager, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Load configuration
 	config, err := LoadConfig(configPath)
 	if err != nil {
@@ -256,17 +283,21 @@ func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, e
 		return nil, fmt.Errorf("failed to build DSN for driver %s", config.Database.Driver)
 	}
 
-	driver, err := NewDriver(config.Database.Driver, dsn)
+	connectCtx, cancel := config.ConnectContext(ctx)
+	defer cancel()
+
+	driver, err := NewDriver(connectCtx, config.Database.Driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database driver (dsn=%s): %w", redactDSN(dsn), err)
 	}
-	historyDriver, err := NewHistoryDriver("db", config.Database.Driver, dsn, config.Migration.TableName)
+	historyDriver, err := NewHistoryDriver(connectCtx, "db", config.Database.Driver, dsn, config.Migration.TableName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize history driver (dsn=%s): %w", redactDSN(dsn), err)
 	}
 
 	// Create manager with configuration
 	allOpts := []ManagerOption{
+		WithContext(ctx),
 		WithConfig(config),
 		WithConfigPath(configPath),
 		WithDriver(driver),
@@ -279,7 +310,14 @@ func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, e
 	return manager, nil
 }
 
-func (d *Manager) Run(clients ...contracts.Cli) {
+// Run registers the CLI commands and runs the CLI. ctx becomes the manager's
+// root context: every command handler pulls it back out via Context() and
+// passes it down to the database calls, so cancelling it (e.g. on SIGINT)
+// cancels an in-flight migration.
+func (d *Manager) Run(ctx context.Context, clients ...contracts.Cli) {
+	if ctx != nil {
+		d.ctx = ctx
+	}
 	var client contracts.Cli
 	if len(clients) > 0 {
 		client = clients[0]
@@ -294,6 +332,14 @@ func (d *Manager) Run(clients ...contracts.Cli) {
 	cmds := append(GetCommands(d), d.command...)
 	client.Register(cmds)
 	client.Run(os.Args, true)
+}
+
+// Context returns the manager's root context.
+func (d *Manager) Context() context.Context {
+	if d.ctx == nil {
+		return context.Background()
+	}
+	return d.ctx
 }
 
 func (d *Manager) SetDialect(dialect string) {
@@ -317,8 +363,8 @@ func (d *Manager) ConfigPath() string {
 	return d.configPath
 }
 
-func (d *Manager) ValidateHistoryStorage() error {
-	return d.historyDriver.ValidateStorage()
+func (d *Manager) ValidateHistoryStorage(ctx context.Context) error {
+	return d.historyDriver.ValidateStorage(ctx)
 }
 
 // readFile reads a file either from the embedded assets FS (if present) or the
@@ -551,7 +597,7 @@ func validateMigrationIdentifiers(m Migration) error {
 	return v.Error()
 }
 
-func (d *Manager) ApplyMigration(m Migration) error {
+func (d *Manager) ApplyMigration(ctx context.Context, m Migration) error {
 	// Validate migration name
 	if err := requireFields(m.Name); err != nil {
 		return fmt.Errorf("ApplyMigration: invalid migration name: %w", err)
@@ -576,7 +622,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 	}
 
 	checksum := cached.checksum
-	histories, err := d.historyDriver.Load()
+	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load migration history: %w", err)
 	}
@@ -592,7 +638,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 			}
 			if d.Force {
 				logger.Warn().Msgf("Checksum mismatch for '%s', force-applying", m.Name)
-				d.historyDriver.Rollback(h)
+				d.historyDriver.Rollback(ctx, h)
 				break
 			}
 			return fmt.Errorf("migration '%s' has been modified after being applied (checksum mismatch)", m.Name)
@@ -614,7 +660,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		}
 		dialect = normalizedDriver
 		if migration.Connection != "" {
-			dbDriver, err = NewDriver(normalizedDriver, migration.Connection)
+			dbDriver, err = NewDriver(ctx, normalizedDriver, migration.Connection)
 			if err != nil {
 				return fmt.Errorf("failed to create driver for migration %s: %w", migration.Name, err)
 			}
@@ -647,7 +693,7 @@ func (d *Manager) ApplyMigration(m Migration) error {
 			return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
 		}
 	}
-	if err := dbDriver.ApplySQL(queries); err != nil {
+	if err := dbDriver.ApplySQL(ctx, queries); err != nil {
 		return fmt.Errorf("failed to apply migration %s: %w", m.Name, err)
 	}
 	for _, val := range migration.Validate {
@@ -664,15 +710,15 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		Checksum:    checksum,
 		AppliedAt:   now,
 	}
-	return d.historyDriver.Save(history)
+	return d.historyDriver.Save(ctx, history)
 }
 
-func (d *Manager) RollbackMigration(step int) error {
+func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 	if d.dbDriver == nil {
 		return fmt.Errorf("no database driver configured for rollback")
 	}
 
-	histories, err := d.historyDriver.Load()
+	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load migration history: %w", err)
 	}
@@ -742,7 +788,7 @@ func (d *Manager) RollbackMigration(step int) error {
 			if d.Verbose {
 				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
 			}
-			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
+			if err := d.dbDriver.ApplySQL(ctx, []string{down}); err != nil {
 				if !d.Force {
 					return fmt.Errorf("failed to rollback raw migration %s: %w", name, err)
 				}
@@ -785,7 +831,7 @@ func (d *Manager) RollbackMigration(step int) error {
 			}
 			dialect = normalizedDriver
 			if migration.Connection != "" {
-				dbDriver, err = NewDriver(normalizedDriver, migration.Connection)
+				dbDriver, err = NewDriver(ctx, normalizedDriver, migration.Connection)
 				if err != nil {
 					return fmt.Errorf("failed to create driver for migration %s: %w", migration.Name, err)
 				}
@@ -806,13 +852,13 @@ func (d *Manager) RollbackMigration(step int) error {
 				logger.Info().Msg(q)
 			}
 		}
-		if err := dbDriver.ApplySQL(downQueries); err != nil {
+		if err := dbDriver.ApplySQL(ctx, downQueries); err != nil {
 			if !d.Force {
 				return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 			}
 			logger.Warn().Msgf("Failed to rollback migration %s (continuing): %v", name, err)
 			histories = histories[:len(histories)-1]
-			if histErr := d.historyDriver.Rollback(histories...); histErr != nil {
+			if histErr := d.historyDriver.Rollback(ctx, histories...); histErr != nil {
 				logger.Error().Msgf("Failed to update history after rollback error: %v", histErr)
 			}
 		} else {
@@ -825,13 +871,13 @@ func (d *Manager) RollbackMigration(step int) error {
 	for _, h := range histories {
 		remainingNames = append(remainingNames, h.Name)
 	}
-	return d.historyDriver.Rollback(histories...)
+	return d.historyDriver.Rollback(ctx, histories...)
 }
 
-func (d *Manager) ResetMigrations() error {
+func (d *Manager) ResetMigrations(ctx context.Context) error {
 	logger.Info().Msg("Resetting migrations...")
 
-	histories, err := d.historyDriver.Load()
+	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
 		return err
 	}
@@ -879,7 +925,7 @@ func (d *Manager) ResetMigrations() error {
 			if d.Verbose {
 				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
 			}
-			if err := d.dbDriver.ApplySQL([]string{down}); err != nil {
+			if err := d.dbDriver.ApplySQL(ctx, []string{down}); err != nil {
 				if !d.Force {
 					return fmt.Errorf("failed to rollback raw migration %s: %w", name, err)
 				}
@@ -922,7 +968,7 @@ func (d *Manager) ResetMigrations() error {
 			}
 			dialect = normalizedDriver
 			if migration.Connection != "" {
-				dbDriver, err = NewDriver(normalizedDriver, migration.Connection)
+				dbDriver, err = NewDriver(ctx, normalizedDriver, migration.Connection)
 				if err != nil {
 					return fmt.Errorf("failed to create driver for migration %s: %w", migration.Name, err)
 				}
@@ -943,7 +989,7 @@ func (d *Manager) ResetMigrations() error {
 				logger.Info().Msg(q)
 			}
 		}
-		if err := dbDriver.ApplySQL(downQueries); err != nil {
+		if err := dbDriver.ApplySQL(ctx, downQueries); err != nil {
 			if !d.Force {
 				return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 			}
@@ -956,16 +1002,16 @@ func (d *Manager) ResetMigrations() error {
 	}
 
 	// Clear all history after successful rollback of all migrations
-	return d.historyDriver.Rollback()
+	return d.historyDriver.Rollback(ctx)
 }
 
-func (d *Manager) ValidateMigrations() error {
+func (d *Manager) ValidateMigrations(ctx context.Context) error {
 	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to list migration files")
 		return fmt.Errorf("failed to list migration files: %w", err)
 	}
-	histories, err := d.historyDriver.Load()
+	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to load migration history")
 		return err
@@ -999,7 +1045,10 @@ func (d *Manager) ValidateMigrations() error {
 	return nil
 }
 
-func (d *Manager) CreateSeedFile(name string, raw bool) error {
+func (d *Manager) CreateSeedFile(ctx context.Context, name string, raw bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	tableName := strings.TrimSuffix(strings.TrimPrefix(name, "seed_"), ".bcl")
 	name = fmt.Sprintf("%d_%s", time.Now().Unix(), name)
 	var filename string
@@ -1028,7 +1077,10 @@ func (d *Manager) CreateSeedFile(name string, raw bool) error {
 	return nil
 }
 
-func (d *Manager) CreateMigrationFile(name string, raw bool) error {
+func (d *Manager) CreateMigrationFile(ctx context.Context, name string, raw bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var filename string
 	if strings.Contains(name, string(os.PathSeparator)) {
 		dir := filepath.Dir(name)
@@ -1416,14 +1468,14 @@ func deriveVersionFromFilename(fname string) string {
 
 // ApplySQLMigration applies a raw .sql migration file by running the -- migration-up
 // section and recording it in history (checksum computed from file contents).
-func (d *Manager) ApplySQLMigration(path string) error {
+func (d *Manager) ApplySQLMigration(ctx context.Context, path string) error {
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	data, err := d.readFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read migration file %s: %w", path, err)
 	}
 	checksum := computeChecksum(data)
-	histories, err := d.historyDriver.Load()
+	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load migration history: %w", err)
 	}
@@ -1438,7 +1490,7 @@ func (d *Manager) ApplySQLMigration(path string) error {
 			}
 			if d.Force {
 				logger.Warn().Msgf("Checksum mismatch for '%s', force-applying", name)
-				d.historyDriver.Rollback(h)
+				d.historyDriver.Rollback(ctx, h)
 				break
 			}
 			return fmt.Errorf("migration '%s' has been modified after being applied (checksum mismatch)", name)
@@ -1455,7 +1507,7 @@ func (d *Manager) ApplySQLMigration(path string) error {
 		logger.Info().Msgf("Applying raw SQL migration '%s' details:", name)
 		logger.Info().Msg(up)
 	}
-	if err := d.dbDriver.ApplySQL([]string{up}); err != nil {
+	if err := d.dbDriver.ApplySQL(ctx, []string{up}); err != nil {
 		return fmt.Errorf("failed to apply raw migration %s: %w", name, err)
 	}
 	now := time.Now()
@@ -1466,7 +1518,7 @@ func (d *Manager) ApplySQLMigration(path string) error {
 		Checksum:    checksum,
 		AppliedAt:   now,
 	}
-	return d.historyDriver.Save(history)
+	return d.historyDriver.Save(ctx, history)
 }
 
 // lockInfo describes the metadata persisted inside the migration lock file so
@@ -1579,7 +1631,7 @@ func runPostUpChecks(checks []string) error {
 	return nil
 }
 
-func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) error {
+func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, seedFiles ...string) error {
 	if d.dbDriver == nil {
 		return fmt.Errorf("no database driver configured for seeding")
 	}
@@ -1622,7 +1674,7 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 				logger.Warn().Msgf("Truncate flag ignored for raw seed file: %s", seedFile)
 			}
 			logger.Info().Msgf("Applying raw seed file: %s", seedFile)
-			if err := d.dbDriver.ApplySQL([]string{sql}); err != nil {
+			if err := d.dbDriver.ApplySQL(ctx, []string{sql}); err != nil {
 				logger.Error().Msgf("Failed to apply raw seed file '%s': %v", seedFile, err)
 				if !d.Force {
 					return fmt.Errorf("failed to apply raw seed file %s: %w", seedFile, err)
@@ -1672,7 +1724,7 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 						if d.Verbose {
 							logger.Info().Msg("Executing truncate SQL")
 						}
-						if err := d.dbDriver.ApplySQL([]string{query}); err != nil {
+						if err := d.dbDriver.ApplySQL(ctx, []string{query}); err != nil {
 							logger.Error().Msgf("Failed to truncate table '%s': %v", seed.Table, err)
 							if !d.Force {
 								return fmt.Errorf("failed to truncate table %s: %w", seed.Table, err)
@@ -1692,7 +1744,7 @@ func (d *Manager) RunSeeds(truncate bool, includeRaw bool, seedFiles ...string) 
 					if d.Verbose {
 						logger.Info().Msg("Executing seed SQL")
 					}
-					if err := d.dbDriver.ApplySQL([]string{q.SQL}, q.Args); err != nil {
+					if err := d.dbDriver.ApplySQL(ctx, []string{q.SQL}, q.Args); err != nil {
 						logger.Error().Msgf("Seed failed (%s): %v", seedFile, err)
 						if !d.Force {
 							return fmt.Errorf("seed failed for %s: %w", seedFile, err)

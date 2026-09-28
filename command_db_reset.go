@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -48,6 +49,9 @@ func (c *ResetDatabaseCommand) Extend() contracts.Extend {
 }
 
 func (c *ResetDatabaseCommand) Handle(ctx contracts.Context) error {
+	// contracts.Context is the CLI framework's own type; the cancellable
+	// context.Context comes from the manager (set by Manager.Run).
+	runCtx := c.Driver.Context()
 	configPath := ctx.Option("config")
 	force := ctx.Option("force") == "true" || ctx.Option("force") == "1"
 	verbose := ctx.Option("verbose") == "true" || ctx.Option("verbose") == "1"
@@ -96,29 +100,31 @@ func (c *ResetDatabaseCommand) Handle(ctx contracts.Context) error {
 
 	switch cfg.Database.Driver {
 	case "postgres":
-		return resetPostgres(cfg)
+		return resetPostgres(runCtx, cfg)
 	case "mysql":
-		return resetMySQL(cfg)
+		return resetMySQL(runCtx, cfg)
 	case "sqlite":
-		return resetSQLite(cfg)
+		return resetSQLite(runCtx, cfg)
 	default:
 		return fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
 	}
 }
 
-func resetPostgres(cfg *MigrateConfig) error {
+func resetPostgres(ctx context.Context, cfg *MigrateConfig) error {
 	// Connect to postgres DB to run drop/create
 	admin := *cfg
 	admin.Database.Database = "postgres"
 	dsn := admin.GetDSN()
-	driver, err := NewDriver("postgres", dsn)
+	connectCtx, cancel := cfg.ConnectContext(ctx)
+	defer cancel()
+	driver, err := NewDriver(connectCtx, "postgres", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres for admin operations: %w", err)
 	}
 	name := strings.ReplaceAll(cfg.Database.Database, "\"", "\"\"")
 	// Terminate existing connections to the target database so DROP can succeed
 	terminate := fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid();", strings.ReplaceAll(cfg.Database.Database, "'", "''"))
-	if err := driver.ApplySQL([]string{terminate}); err != nil {
+	if err := driver.ApplySQL(ctx, []string{terminate}); err != nil {
 		// Log as warning and continue; DROP may still fail if other connections remain
 		logger.Warn().Msgf("failed to terminate existing connections to '%s': %v", cfg.Database.Database, err)
 	}
@@ -126,21 +132,23 @@ func resetPostgres(cfg *MigrateConfig) error {
 	// Create database from template0 to avoid inheriting objects from template1
 	create := fmt.Sprintf("CREATE DATABASE \"%s\" TEMPLATE template0;", name)
 	logger.Info().Msgf("Dropping database '%s'...", cfg.Database.Database)
-	if err := driver.ApplySQL([]string{drop}); err != nil {
+	if err := driver.ApplySQL(ctx, []string{drop}); err != nil {
 		return fmt.Errorf("failed to drop database: %w", err)
 	}
 	logger.Info().Msgf("Creating database '%s'...", cfg.Database.Database)
-	if err := driver.ApplySQL([]string{create}); err != nil {
+	if err := driver.ApplySQL(ctx, []string{create}); err != nil {
 		return fmt.Errorf("failed to create database: %w", err)
 	}
 	logger.Info().Msg("Database reset complete.")
 	return nil
 }
 
-func resetMySQL(cfg *MigrateConfig) error {
+func resetMySQL(ctx context.Context, cfg *MigrateConfig) error {
 	// Build admin DSN without a database
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/", cfg.Database.Username, cfg.Database.Password, cfg.Database.Host, cfg.Database.Port)
-	driver, err := NewDriver("mysql", dsn)
+	connectCtx, cancel := cfg.ConnectContext(ctx)
+	defer cancel()
+	driver, err := NewDriver(connectCtx, "mysql", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to connect to mysql for admin operations: %w", err)
 	}
@@ -148,18 +156,18 @@ func resetMySQL(cfg *MigrateConfig) error {
 	drop := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", name)
 	create := fmt.Sprintf("CREATE DATABASE `%s` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", name)
 	logger.Info().Msgf("Dropping database '%s'...", cfg.Database.Database)
-	if err := driver.ApplySQL([]string{drop}); err != nil {
+	if err := driver.ApplySQL(ctx, []string{drop}); err != nil {
 		return fmt.Errorf("failed to drop database: %w", err)
 	}
 	logger.Info().Msgf("Creating database '%s'...", cfg.Database.Database)
-	if err := driver.ApplySQL([]string{create}); err != nil {
+	if err := driver.ApplySQL(ctx, []string{create}); err != nil {
 		return fmt.Errorf("failed to create database: %w", err)
 	}
 	logger.Info().Msg("Database reset complete.")
 	return nil
 }
 
-func resetSQLite(cfg *MigrateConfig) error {
+func resetSQLite(ctx context.Context, cfg *MigrateConfig) error {
 	path := cfg.Database.Database
 	logger.Info().Msgf("Removing sqlite file '%s'...", path)
 	if _, err := os.Stat(path); err == nil {
@@ -168,7 +176,9 @@ func resetSQLite(cfg *MigrateConfig) error {
 		}
 	}
 	// Recreate empty sqlite DB (driver will create file)
-	if _, err := NewDriver("sqlite", path); err != nil {
+	connectCtx, cancel := cfg.ConnectContext(ctx)
+	defer cancel()
+	if _, err := NewDriver(connectCtx, "sqlite", path); err != nil {
 		return fmt.Errorf("failed to create sqlite database: %w", err)
 	}
 	logger.Info().Msg("Database reset complete.")

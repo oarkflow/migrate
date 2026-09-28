@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -671,13 +672,13 @@ func (m Migration) ToSQL(dialect string, up bool) ([]string, error) {
 }
 
 // RunSeeds executes the seed SQL statements for a given SeedDefinition.
-func RunSeeds(seed SeedDefinition, dialect string, dbDriver IDatabaseDriver) error {
+func RunSeeds(ctx context.Context, seed SeedDefinition, dialect string, dbDriver IDatabaseDriver) error {
 	queries, err := seed.ToSQL(dialect)
 	if err != nil {
 		return err
 	}
 	for _, q := range queries {
-		if err := dbDriver.ApplySQL([]string{q.SQL}, q.Args); err != nil {
+		if err := dbDriver.ApplySQL(ctx, []string{q.SQL}, q.Args); err != nil {
 			return fmt.Errorf("failed to apply seed: %w", err)
 		}
 	}
@@ -702,18 +703,18 @@ func NormalizeDriver(driver string) (string, error) {
 	}
 }
 
-func NewDriver(driver string, dsn string) (IDatabaseDriver, error) {
+func NewDriver(ctx context.Context, driver string, dsn string) (IDatabaseDriver, error) {
 	normalizedDriver, err := NormalizeDriver(driver)
 	if err != nil {
 		return nil, err
 	}
 	switch normalizedDriver {
 	case "mysql":
-		return drivers.NewMySQLDriver(dsn)
+		return drivers.NewMySQLDriver(ctx, dsn)
 	case "postgres":
-		return drivers.NewPostgresDriver(dsn)
+		return drivers.NewPostgresDriver(ctx, dsn)
 	case "sqlite":
-		return drivers.NewSQLiteDriver(dsn)
+		return drivers.NewSQLiteDriver(ctx, dsn)
 	}
 	return nil, fmt.Errorf("unsupported driver: %s", normalizedDriver)
 }
@@ -735,7 +736,7 @@ func NewFromDB(driver string, db *squealx.DB) (IDatabaseDriver, error) {
 }
 
 // NewHistoryDriver returns an implementation of HistoryDriver (file, db, etc.)
-func NewHistoryDriver(driver, dialect, config string, tables ...string) (HistoryDriver, error) {
+func NewHistoryDriver(ctx context.Context, driver, dialect, config string, tables ...string) (HistoryDriver, error) {
 	switch driver {
 	case "file":
 		return NewFileHistoryDriver(config), nil
@@ -744,7 +745,7 @@ func NewHistoryDriver(driver, dialect, config string, tables ...string) (History
 		if err != nil {
 			return nil, err
 		}
-		return NewDatabaseHistoryDriver(normalizedDialect, config, tables...)
+		return NewDatabaseHistoryDriver(ctx, normalizedDialect, config, tables...)
 	default:
 		return nil, fmt.Errorf("unsupported history driver: %s", driver)
 	}

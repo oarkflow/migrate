@@ -304,7 +304,7 @@ func (c *StatusCommand) Handle(ctx contracts.Context) error {
 	}
 
 	// Get applied migrations
-	if err := c.Driver.ValidateHistoryStorage(); err != nil {
+	if err := c.Driver.ValidateHistoryStorage(c.Driver.Context()); err != nil {
 		return fmt.Errorf("failed to validate history storage: %w", err)
 	}
 

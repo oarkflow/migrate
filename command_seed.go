@@ -35,7 +35,7 @@ func (c *ValidateCommand) Extend() contracts.Extend {
 }
 
 func (c *ValidateCommand) Handle(ctx contracts.Context) error {
-	return c.Driver.ValidateMigrations()
+	return c.Driver.ValidateMigrations(c.Driver.Context())
 }
 
 type SeedCommand struct {
@@ -133,5 +133,5 @@ func (c *SeedCommand) Handle(ctx contracts.Context) error {
 		logger.Printf("No seed files found in %s", c.Driver.SeedDir())
 		return nil
 	}
-	return c.Driver.RunSeeds(truncate, includeRaw, files...)
+	return c.Driver.RunSeeds(c.Driver.Context(), truncate, includeRaw, files...)
 }

@@ -1,11 +1,13 @@
 package migrate
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/oarkflow/json"
 )
@@ -379,6 +381,21 @@ func (c *MigrateConfig) GetDSN() string {
 	default:
 		return ""
 	}
+}
+
+// ConnectContext derives the context used for establishing a database
+// connection (open + ping) from parent. When database.timeout is configured
+// (in seconds) the derived context carries that deadline, so a hung connection
+// attempt fails instead of blocking forever. The returned cancel func must
+// always be called.
+func (c *MigrateConfig) ConnectContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if c == nil || c.Database.Timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, time.Duration(c.Database.Timeout)*time.Second)
 }
 
 // ApplyEnvironmentOverrides applies environment variable overrides
