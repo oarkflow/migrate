@@ -8,7 +8,7 @@ A powerful, flexible database migration tool for Go applications that supports m
 - **Multi-Database Support:** PostgreSQL, MySQL, and SQLite
 - **BCL-Based Migrations:** Write migrations in a simple, declarative BCL format
 - **Automatic SQL Generation:** Converts BCL definitions to database-specific SQL
-- **Transaction Safety:** All migrations run within transactions for consistency
+- **Transaction Safety:** Each migration's statements run within a transaction (where the dialect supports transactional DDL) for per-migration consistency. Note: a `migrate` run that applies several pending migrations is not atomic as a whole — see [Transactions, Atomicity, and Locking](#transactions-atomicity-and-locking) below.
 - **Rollback Support:** Safe rollback of migrations with validation
 - **Migration History:** Track applied migrations with checksums for integrity
 - **Dry Run Mode:** Preview migrations without applying them
@@ -220,6 +220,18 @@ Override configuration with environment variables:
 - `MIGRATE_SEED_DIR` - Seed directory
 - `MIGRATE_LOG_LEVEL` - Log level
 - `MIGRATE_VERBOSE` - Enable verbose logging
+
+## 🔒 Transactions, Atomicity, and Locking
+
+### Transactions and Atomicity
+
+- **Per-migration transactions:** Each individual migration's statements are executed within a transaction where the target dialect supports transactional DDL. If a statement in a migration fails, that migration's changes are rolled back.
+- **Not atomic across a run:** A `migrate` invocation that applies several pending migrations in one batch is **not** wrapped in a single overarching transaction. Each migration commits independently, so if migration #7 of 10 fails, migrations #1-6 remain applied and #7-10 are not — the run stops with a partially-applied batch, not a fully rolled-back one. Always check `status` after a failed run to see exactly what was applied, and design migrations so each one is independently safe to leave applied.
+- **`--force` trades safety for progress:** When `--force=true` is passed to `migrate`, `migration:rollback`, or `migration:reset`, the tool executes statements individually (outside a transaction) and continues past statement errors instead of stopping, logging each failure as it goes. This means `--force` can leave the schema in a partially-applied or partially-rolled-back state even *within* a single migration. Use `--force` only when you deliberately want the run to push through errors (e.g., cleaning up history for migrations whose objects no longer exist), and always review the resulting schema and migration history afterward to confirm the outcome is what you expect.
+
+### Locking
+
+Migrations are coordinated with a local, file-based lock (see `migration.lock_timeout` in the configuration) to prevent two processes on the same host/filesystem from running migrations against the same migration directory concurrently. `lock_timeout` controls how long a lock is considered valid before it is treated as stale and can be reclaimed, which prevents a crashed or killed process from permanently blocking future runs. This locking is **single-host and filesystem-local only** — it does not coordinate across multiple hosts or containers (e.g., separate pods/instances) applying migrations to the same remote database. If you run migrations from multiple hosts against a shared database, use an external coordination mechanism (e.g., a deployment step that runs migrations from a single node, or a database-level advisory lock outside this tool) to avoid concurrent runs.
 
 ## 📝 Migration Examples
 
@@ -1090,7 +1102,7 @@ go run main.go cli history --object=users --serve=true
 This will start a web server at `http://localhost:8080/history` with an interactive report.
 
 ## Effectiveness
-- **Reliability:** Ensures migrations are applied safely using checksum comparison and transactional operations.
+- **Reliability:** Ensures individual migrations are applied safely using checksum comparison and per-migration transactional operations (see [Transactions, Atomicity, and Locking](#transactions-atomicity-and-locking) for the boundaries of these guarantees).
 - **Ease of Use:** Simple command-line interface with clear commands and descriptive error logging.
 - **Flexibility:** Automatically adapts SQL generation based on target dialect (Postgres, MySQL, SQLite).
 - **Extensibility:** Add new drivers, dialects, or history storage backends without changing core logic.
@@ -1229,14 +1241,14 @@ Command (rollback last migration):
 ```
 $ go run main.go cli migration:rollback --step=1
 ```
-Rollback supports both `.bcl` and raw `.sql` migrations. For raw SQL, the tool executes the `-- migration-down` section. Rollback fails on missing down SQL or statement errors unless `--force=true` is provided.
+Rollback supports both `.bcl` and raw `.sql` migrations. For raw SQL, the tool executes the `-- migration-down` section. Rollback fails on missing down SQL or statement errors unless `--force=true` is provided. `--force=true` continues past those errors rather than stopping, which can leave the schema partially rolled back — see [Transactions, Atomicity, and Locking](#transactions-atomicity-and-locking).
 
 ### Reset Migrations
 Command:
 ```
 $ go run main.go cli migration:reset
 ```
-Reset rolls back all applied migrations in reverse history order. It supports mixed `.bcl` and raw `.sql` histories. Use `--force=true` only when you explicitly want reset to continue after rollback errors.
+Reset rolls back all applied migrations in reverse history order. It supports mixed `.bcl` and raw `.sql` histories. Use `--force=true` only when you explicitly want reset to continue after rollback errors, and review the resulting history afterward since it can leave the schema partially rolled back.
 
 ### Validate Migration History
 Command:
