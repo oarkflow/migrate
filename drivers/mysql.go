@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -24,10 +25,10 @@ func NewMySQLDriverFromDB(db *squealx.DB) *MySQLDriver {
 func NewMySQLDriver(dsn string) (*MySQLDriver, error) {
 	db, err := mysql.Open(dsn, "mysql")
 	if err != nil {
-		return nil, fmt.Errorf("failed to open connection: %w", err)
+		return nil, fmt.Errorf("failed to open connection to %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
 	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		return nil, fmt.Errorf("failed to ping database %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
 	return &MySQLDriver{db: db}, nil
 }
@@ -47,8 +48,16 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 		return nil
 	}
 
-	// Force mode: execute each statement individually without transaction, log errors and continue
+	// Force mode: MySQL DDL statements issue an implicit commit anyway, so a
+	// surrounding transaction provides no real atomicity across statements.
+	// We execute each statement individually and keep going past failures
+	// (so a bad statement doesn't block the rest), but we track every
+	// failure and never report success when one occurred: the caller (and
+	// migration history) must see an accurate, honest partial-failure
+	// result rather than a false "fully applied".
 	if m.Force {
+		var failures []error
+		applied := 0
 		for _, q := range stmts {
 			q = strings.TrimSpace(q)
 			if q == "" {
@@ -62,7 +71,13 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 			}
 			if err != nil {
 				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
+				failures = append(failures, fmt.Errorf("statement failed [%s]: %w", q, err))
+				continue
 			}
+			applied++
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("force mode: %d/%d statements applied, %d failed: %w", applied, len(stmts), len(failures), errors.Join(failures...))
 		}
 		return nil
 	}
