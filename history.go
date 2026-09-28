@@ -27,6 +27,7 @@ func isValidIdentifier(name string) bool {
 
 // MigrationHistory holds a migration history record.
 type MigrationHistory struct {
+	Id          int64     `json:"id" db:"id"`
 	Name        string    `json:"name" db:"name"`
 	Version     string    `json:"version" db:"version"`
 	Description string    `json:"description" db:"description"`
