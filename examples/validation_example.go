@@ -177,10 +177,12 @@ func validationExampleMain() {
 		{"contains spaces", "user table", false},
 		{"contains hyphens", "user-table", false},
 		{"too long", "this_is_a_very_long_table_name_that_exceeds_the_maximum_length_limit_for_identifiers", false},
-		// SQL reserved/keyword-like names are allowed: every identifier this
-		// validator guards is always emitted through a dialect's
+		// SQL reserved/keyword-like names are allowed here: every identifier
+		// this validator guards is always emitted through a dialect's
 		// quoteIdentifier, which safely quotes it regardless of keyword
 		// status, so real column/table names like these aren't rejected.
+		// migrate.IsReservedKeyword(word) is still available separately for
+		// contexts that do NOT already quote the identifier.
 		{"reserved word is allowed", "select", true},
 		{"reserved word uppercase is allowed", "TABLE", true},
 		{"common reserved-adjacent column name is allowed", "action", true},

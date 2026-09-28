@@ -73,4 +73,28 @@ func TestValidateSQLIdentifier(t *testing.T) {
 	if err := ValidateSQLIdentifier("field", "bad`name"); err == nil {
 		t.Error("expected identifier with embedded backtick to be rejected")
 	}
+	// Reserved SQL keywords are valid identifiers here: every identifier
+	// ValidateSQLIdentifier guards is always emitted through a dialect's
+	// quoteIdentifier, so keyword status alone isn't a rejection reason.
+	if err := ValidateSQLIdentifier("field", "action"); err != nil {
+		t.Errorf("expected reserved-keyword identifier 'action' to pass, got error: %v", err)
+	}
+}
+
+// TestIsReservedKeyword exercises the informational reserved-keyword helper,
+// which is intentionally NOT used by ValidateIdentifier/ValidateSQLIdentifier
+// (see their doc comments) but is kept available for callers that need to
+// know whether an identifier requires quoting in a context that doesn't
+// already quote it.
+func TestIsReservedKeyword(t *testing.T) {
+	for _, word := range []string{"select", "TABLE", "Action", "order", "user"} {
+		if !IsReservedKeyword(word) {
+			t.Errorf("expected %q to be recognized as a reserved keyword", word)
+		}
+	}
+	for _, word := range []string{"users", "email_address", "created_at"} {
+		if IsReservedKeyword(word) {
+			t.Errorf("expected %q to NOT be recognized as a reserved keyword", word)
+		}
+	}
 }
