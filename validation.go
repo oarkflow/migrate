@@ -87,6 +87,19 @@ func (v *Validator) ValidateIdentifier(field, value string) {
 	}
 }
 
+// ValidateSQLIdentifier validates a single SQL identifier (table name, column
+// name, etc.) and returns a Go error if it is empty, malformed, too long, or
+// a reserved keyword. It is intended to be called defensively at the point
+// where identifiers coming from migration definitions are first used to
+// generate SQL, so that obviously malicious or malformed identifiers (e.g.
+// containing quote characters used to break out of a quoted identifier) are
+// rejected outright instead of merely being escaped.
+func ValidateSQLIdentifier(field, value string) error {
+	v := NewValidator()
+	v.ValidateIdentifier(field, value)
+	return v.Error()
+}
+
 // ValidateDataType validates field data types
 func (v *Validator) ValidateDataType(field, value string) {
 	if value == "" {

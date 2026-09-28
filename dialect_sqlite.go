@@ -9,7 +9,11 @@ import (
 type SQLiteDialect struct{}
 
 func (s *SQLiteDialect) quoteIdentifier(id string) string {
-	return fmt.Sprintf("\"%s\"", id)
+	// Escape embedded double quotes by doubling them, per standard SQL
+	// identifier-quoting rules, so an identifier cannot break out of the
+	// quoted identifier and inject arbitrary SQL.
+	escaped := strings.ReplaceAll(id, "\"", "\"\"")
+	return fmt.Sprintf("\"%s\"", escaped)
 }
 
 func (s *SQLiteDialect) TableExistsSQL(table string) string {
@@ -20,7 +24,20 @@ func (s *SQLiteDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) 
 	if err := requireFields(ct.Name); err != nil {
 		return "", fmt.Errorf("SQLiteDialect.CreateTableSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("table.name", ct.Name); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.CreateTableSQL: %w", err)
+	}
 	if up {
+		for _, col := range ct.AddFields {
+			if err := ValidateSQLIdentifier("field.name", col.Name); err != nil {
+				return "", fmt.Errorf("SQLiteDialect.CreateTableSQL: %w", err)
+			}
+		}
+		for _, col := range ct.PrimaryKey {
+			if err := ValidateSQLIdentifier("primary_key", col); err != nil {
+				return "", fmt.Errorf("SQLiteDialect.CreateTableSQL: %w", err)
+			}
+		}
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", s.quoteIdentifier(ct.Name)))
 		var cols []string
@@ -79,6 +96,12 @@ func (s *SQLiteDialect) RenameTableSQL(rt RenameTable) (string, error) {
 	if err := requireFields(rt.OldName, rt.NewName); err != nil {
 		return "", fmt.Errorf("SQLiteDialect.RenameTableSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("table.old_name", rt.OldName); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.RenameTableSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.new_name", rt.NewName); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.RenameTableSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME TO %s;", s.quoteIdentifier(rt.OldName), s.quoteIdentifier(rt.NewName)), nil
 }
 
@@ -99,6 +122,9 @@ func (s *SQLiteDialect) DropMaterializedViewSQL(dmv DropMaterializedView) (strin
 }
 
 func (s *SQLiteDialect) DropTableSQL(dt DropTable) (string, error) {
+	if err := ValidateSQLIdentifier("table.name", dt.Name); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.DropTableSQL: %w", err)
+	}
 	return fmt.Sprintf("DROP TABLE IF EXISTS %s;", s.quoteIdentifier(dt.Name)), nil
 }
 
@@ -108,6 +134,12 @@ func (s *SQLiteDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 
 func (s *SQLiteDialect) AddFieldSQL(ac AddField, tableName string) ([]string, error) {
 	if err := requireFields(ac.Name, tableName); err != nil {
+		return nil, fmt.Errorf("SQLiteDialect.AddFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.name", ac.Name); err != nil {
+		return nil, fmt.Errorf("SQLiteDialect.AddFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
 		return nil, fmt.Errorf("SQLiteDialect.AddFieldSQL: %w", err)
 	}
 	var queries []string
@@ -146,6 +178,12 @@ func (s *SQLiteDialect) AddFieldSQL(ac AddField, tableName string) ([]string, er
 
 func (s *SQLiteDialect) DropFieldSQL(dc DropField, tableName string) (string, error) {
 	if err := requireFields(dc.Name, tableName); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.DropFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.name", dc.Name); err != nil {
+		return "", fmt.Errorf("SQLiteDialect.DropFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
 		return "", fmt.Errorf("SQLiteDialect.DropFieldSQL: %w", err)
 	}
 	return "", errors.New("SQLite DROP field must use table recreation")
@@ -266,10 +304,16 @@ func (s *SQLiteDialect) EOS() string {
 }
 
 func (s *SQLiteDialect) InsertSQL(table string, fields []string, values []any) (string, map[string]any, error) {
+	if err := ValidateSQLIdentifier("table.name", table); err != nil {
+		return "", nil, fmt.Errorf("SQLiteDialect.InsertSQL: %w", err)
+	}
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string
 	for i, col := range fields {
+		if err := ValidateSQLIdentifier("field.name", col); err != nil {
+			return "", nil, fmt.Errorf("SQLiteDialect.InsertSQL: %w", err)
+		}
 		quotedCols = append(quotedCols, s.quoteIdentifier(col))
 		paramName := ":" + col
 		namedParams = append(namedParams, paramName)

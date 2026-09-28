@@ -10,7 +10,11 @@ import (
 type PostgresDialect struct{}
 
 func (p *PostgresDialect) quoteIdentifier(id string) string {
-	return fmt.Sprintf("\"%s\"", id)
+	// Escape embedded double quotes by doubling them, per standard SQL
+	// identifier-quoting rules, so an identifier cannot break out of the
+	// quoted identifier and inject arbitrary SQL.
+	escaped := strings.ReplaceAll(id, "\"", "\"\"")
+	return fmt.Sprintf("\"%s\"", escaped)
 }
 
 func (p *PostgresDialect) TableExistsSQL(table string) string {
@@ -21,7 +25,20 @@ func (p *PostgresDialect) CreateTableSQL(ct CreateTable, up bool) (string, error
 	if err := requireFields(ct.Name); err != nil {
 		return "", fmt.Errorf("PostgresDialect.CreateTableSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("table.name", ct.Name); err != nil {
+		return "", fmt.Errorf("PostgresDialect.CreateTableSQL: %w", err)
+	}
 	if up {
+		for _, col := range ct.AddFields {
+			if err := ValidateSQLIdentifier("field.name", col.Name); err != nil {
+				return "", fmt.Errorf("PostgresDialect.CreateTableSQL: %w", err)
+			}
+		}
+		for _, col := range ct.PrimaryKey {
+			if err := ValidateSQLIdentifier("primary_key", col); err != nil {
+				return "", fmt.Errorf("PostgresDialect.CreateTableSQL: %w", err)
+			}
+		}
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", p.quoteIdentifier(ct.Name)))
 		var cols []string
@@ -81,6 +98,12 @@ func (p *PostgresDialect) RenameTableSQL(rt RenameTable) (string, error) {
 	if err := requireFields(rt.OldName, rt.NewName); err != nil {
 		return "", fmt.Errorf("PostgresDialect.RenameTableSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("table.old_name", rt.OldName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameTableSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.new_name", rt.NewName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameTableSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME TO %s;", p.quoteIdentifier(rt.OldName), p.quoteIdentifier(rt.NewName)), nil
 }
 
@@ -114,6 +137,9 @@ func (p *PostgresDialect) EOS() string {
 }
 
 func (p *PostgresDialect) DropTableSQL(dt DropTable) (string, error) {
+	if err := ValidateSQLIdentifier("table.name", dt.Name); err != nil {
+		return "", fmt.Errorf("PostgresDialect.DropTableSQL: %w", err)
+	}
 	cascade := ""
 	if dt.Cascade {
 		cascade = " CASCADE"
@@ -135,6 +161,12 @@ func (p *PostgresDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 
 func (p *PostgresDialect) AddFieldSQL(ac AddField, tableName string) ([]string, error) {
 	if err := requireFields(ac.Name, tableName); err != nil {
+		return nil, fmt.Errorf("PostgresDialect.AddFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.name", ac.Name); err != nil {
+		return nil, fmt.Errorf("PostgresDialect.AddFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
 		return nil, fmt.Errorf("PostgresDialect.AddFieldSQL: %w", err)
 	}
 	var queries []string
@@ -183,6 +215,12 @@ func (p *PostgresDialect) DropFieldSQL(dc DropField, tableName string) (string, 
 	if err := requireFields(dc.Name, tableName); err != nil {
 		return "", fmt.Errorf("PostgresDialect.DropFieldSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("field.name", dc.Name); err != nil {
+		return "", fmt.Errorf("PostgresDialect.DropFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.DropFieldSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(dc.Name)), nil
 }
 
@@ -199,6 +237,15 @@ func (p *PostgresDialect) RenameFieldSQL(rc RenameField, tableName string) (stri
 	}
 	if rc.To == "" {
 		return "", errors.New("postgres requires new field name for renaming field")
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.from", from); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.to", rc.To); err != nil {
+		return "", fmt.Errorf("PostgresDialect.RenameFieldSQL: %w", err)
 	}
 	return fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s;", p.quoteIdentifier(tableName), p.quoteIdentifier(from), p.quoteIdentifier(rc.To)), nil
 }
@@ -321,10 +368,16 @@ func IsInteger(s string) bool {
 }
 
 func (p *PostgresDialect) InsertSQL(table string, fields []string, values []any) (string, map[string]any, error) {
+	if err := ValidateSQLIdentifier("table.name", table); err != nil {
+		return "", nil, fmt.Errorf("PostgresDialect.InsertSQL: %w", err)
+	}
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string
 	for i, col := range fields {
+		if err := ValidateSQLIdentifier("field.name", col); err != nil {
+			return "", nil, fmt.Errorf("PostgresDialect.InsertSQL: %w", err)
+		}
 		quotedCols = append(quotedCols, p.quoteIdentifier(col))
 		paramName := ":" + col
 		namedParams = append(namedParams, paramName)

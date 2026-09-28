@@ -9,7 +9,11 @@ import (
 type MySQLDialect struct{}
 
 func (m *MySQLDialect) quoteIdentifier(id string) string {
-	return fmt.Sprintf("`%s`", id)
+	// Escape embedded backticks by doubling them, per standard MySQL
+	// identifier-quoting rules, so an identifier cannot break out of the
+	// quoted identifier and inject arbitrary SQL.
+	escaped := strings.ReplaceAll(id, "`", "``")
+	return fmt.Sprintf("`%s`", escaped)
 }
 
 func (m *MySQLDialect) TableExistsSQL(table string) string {
@@ -20,7 +24,20 @@ func (m *MySQLDialect) CreateTableSQL(ct CreateTable, up bool) (string, error) {
 	if err := requireFields(ct.Name); err != nil {
 		return "", fmt.Errorf("MySQLDialect.CreateTableSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("table.name", ct.Name); err != nil {
+		return "", fmt.Errorf("MySQLDialect.CreateTableSQL: %w", err)
+	}
 	if up {
+		for _, col := range ct.AddFields {
+			if err := ValidateSQLIdentifier("field.name", col.Name); err != nil {
+				return "", fmt.Errorf("MySQLDialect.CreateTableSQL: %w", err)
+			}
+		}
+		for _, col := range ct.PrimaryKey {
+			if err := ValidateSQLIdentifier("primary_key", col); err != nil {
+				return "", fmt.Errorf("MySQLDialect.CreateTableSQL: %w", err)
+			}
+		}
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("CREATE TABLE %s (", m.quoteIdentifier(ct.Name)))
 		var cols []string
@@ -82,6 +99,12 @@ func (m *MySQLDialect) RenameTableSQL(rt RenameTable) (string, error) {
 	if err := requireFields(rt.OldName, rt.NewName); err != nil {
 		return "", fmt.Errorf("MySQLDialect.RenameTableSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("table.old_name", rt.OldName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameTableSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.new_name", rt.NewName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameTableSQL: %w", err)
+	}
 	return fmt.Sprintf("RENAME TABLE %s TO %s;", m.quoteIdentifier(rt.OldName), m.quoteIdentifier(rt.NewName)), nil
 }
 
@@ -102,6 +125,9 @@ func (m *MySQLDialect) DropMaterializedViewSQL(dmv DropMaterializedView) (string
 }
 
 func (m *MySQLDialect) DropTableSQL(dt DropTable) (string, error) {
+	if err := ValidateSQLIdentifier("table.name", dt.Name); err != nil {
+		return "", fmt.Errorf("MySQLDialect.DropTableSQL: %w", err)
+	}
 	return fmt.Sprintf("DROP TABLE IF EXISTS %s;", m.quoteIdentifier(dt.Name)), nil
 }
 
@@ -111,6 +137,12 @@ func (m *MySQLDialect) DropSchemaSQL(ds DropSchema) (string, error) {
 
 func (m *MySQLDialect) AddFieldSQL(ac AddField, tableName string) ([]string, error) {
 	if err := requireFields(ac.Name, tableName); err != nil {
+		return nil, fmt.Errorf("MySQLDialect.AddFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.name", ac.Name); err != nil {
+		return nil, fmt.Errorf("MySQLDialect.AddFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
 		return nil, fmt.Errorf("MySQLDialect.AddFieldSQL: %w", err)
 	}
 	var queries []string
@@ -162,6 +194,12 @@ func (m *MySQLDialect) DropFieldSQL(dc DropField, tableName string) (string, err
 	if err := requireFields(dc.Name, tableName); err != nil {
 		return "", fmt.Errorf("MySQLDialect.DropFieldSQL: %w", err)
 	}
+	if err := ValidateSQLIdentifier("field.name", dc.Name); err != nil {
+		return "", fmt.Errorf("MySQLDialect.DropFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.DropFieldSQL: %w", err)
+	}
 	return fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", m.quoteIdentifier(tableName), m.quoteIdentifier(dc.Name)), nil
 }
 
@@ -181,6 +219,15 @@ func (m *MySQLDialect) RenameFieldSQL(rc RenameField, tableName string) (string,
 	}
 	if rc.To == "" {
 		return "", errors.New("MySQL requires new field name for renaming field")
+	}
+	if err := ValidateSQLIdentifier("table.name", tableName); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.from", from); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameFieldSQL: %w", err)
+	}
+	if err := ValidateSQLIdentifier("field.to", rc.To); err != nil {
+		return "", fmt.Errorf("MySQLDialect.RenameFieldSQL: %w", err)
 	}
 	return fmt.Sprintf("ALTER TABLE %s CHANGE %s %s %s;", m.quoteIdentifier(tableName), m.quoteIdentifier(from), m.quoteIdentifier(rc.To), rc.Type), nil
 }
@@ -268,10 +315,16 @@ func (m *MySQLDialect) RenameTriggerSQL(rt RenameTrigger) (string, error) {
 }
 
 func (m *MySQLDialect) InsertSQL(table string, fields []string, values []any) (string, map[string]any, error) {
+	if err := ValidateSQLIdentifier("table.name", table); err != nil {
+		return "", nil, fmt.Errorf("MySQLDialect.InsertSQL: %w", err)
+	}
 	var quotedCols []string
 	argMap := make(map[string]any)
 	var namedParams []string
 	for i, col := range fields {
+		if err := ValidateSQLIdentifier("field.name", col); err != nil {
+			return "", nil, fmt.Errorf("MySQLDialect.InsertSQL: %w", err)
+		}
 		quotedCols = append(quotedCols, m.quoteIdentifier(col))
 		paramName := ":" + col
 		namedParams = append(namedParams, paramName)
