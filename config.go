@@ -4,10 +4,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/oarkflow/json"
 )
+
+// redactedPlaceholder replaces any password material found in a DSN before it
+// is logged or otherwise surfaced to the user. The real DSN used to connect
+// to the database is never modified; only the string handed to logging/error
+// reporting call sites should ever pass through this function.
+const redactedPlaceholder = "***REDACTED***"
+
+var (
+	// Matches key=value style password segments, e.g. Postgres DSNs
+	// ("... password=secret sslmode=disable").
+	dsnPasswordKeyValue = regexp.MustCompile(`(?i)(password=)[^\s'"&]*`)
+	// Matches scheme-based "user:password@" segments, e.g.
+	// "postgres://user:secret@host/db".
+	dsnPasswordSchemeUser = regexp.MustCompile(`(://[^:/?#@\s]+):[^@\s]*@`)
+	// Matches bare "user:password@" segments with no scheme, e.g. the MySQL
+	// DSN format "user:secret@tcp(host:port)/db". The password segment
+	// excludes '/' so this does not also swallow a preceding "scheme://".
+	dsnPasswordBareUser = regexp.MustCompile(`^([^:@/\s]+):[^@/\s]*@`)
+)
+
+// redactDSN returns a copy of dsn with any embedded password replaced by a
+// placeholder. It is intended for use anywhere a DSN (or an error/message
+// derived from one) is about to be logged or reported to a user; it must
+// never be used for the DSN actually passed to database drivers.
+func redactDSN(dsn string) string {
+	if dsn == "" {
+		return dsn
+	}
+	redacted := dsnPasswordKeyValue.ReplaceAllString(dsn, "${1}"+redactedPlaceholder)
+	redacted = dsnPasswordSchemeUser.ReplaceAllString(redacted, "${1}:"+redactedPlaceholder+"@")
+	redacted = dsnPasswordBareUser.ReplaceAllString(redacted, "${1}:"+redactedPlaceholder+"@")
+	return redacted
+}
 
 // MigrateConfig represents the configuration for the migration system
 type MigrateConfig struct {

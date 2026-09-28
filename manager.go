@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -162,10 +163,10 @@ func WithConfig(config *MigrateConfig) ManagerOption {
 					if err == nil {
 						m.historyDriver = historyDriver
 					} else {
-						logger.Error().Err(err).Msg("Failed to initialize history driver from config")
+						logger.Error().Err(err).Msgf("Failed to initialize history driver from config (dsn=%s)", redactDSN(dsn))
 					}
 				} else {
-					logger.Error().Err(err).Msg("Failed to initialize database driver from config")
+					logger.Error().Err(err).Msgf("Failed to initialize database driver from config (dsn=%s)", redactDSN(dsn))
 				}
 			}
 		}
@@ -257,11 +258,11 @@ func NewManagerFromConfig(configPath string, opts ...ManagerOption) (*Manager, e
 
 	driver, err := NewDriver(config.Database.Driver, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize database driver: %w", err)
+		return nil, fmt.Errorf("failed to initialize database driver (dsn=%s): %w", redactDSN(dsn), err)
 	}
 	historyDriver, err := NewHistoryDriver("db", config.Database.Driver, dsn, config.Migration.TableName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize history driver: %w", err)
+		return nil, fmt.Errorf("failed to initialize history driver (dsn=%s): %w", redactDSN(dsn), err)
 	}
 
 	// Create manager with configuration
@@ -537,6 +538,19 @@ func (d *Manager) ListSeedFiles(includeRaw bool) ([]string, error) {
 	return files, nil
 }
 
+// validateMigrationIdentifiers rejects a migration whose Up/Down operations
+// reference malformed or malicious SQL identifiers (table/column names, etc.)
+// before those identifiers are used to build SQL. It intentionally reuses the
+// same identifier rules ValidateIdentifier applies elsewhere (e.g. from
+// config.Validate) rather than requiring unrelated migration metadata such as
+// Version/Description.
+func validateMigrationIdentifiers(m Migration) error {
+	v := NewValidator()
+	v.validateOperation("up", m.Up)
+	v.validateOperation("down", m.Down)
+	return v.Error()
+}
+
 func (d *Manager) ApplyMigration(m Migration) error {
 	// Validate migration name
 	if err := requireFields(m.Name); err != nil {
@@ -607,6 +621,9 @@ func (d *Manager) ApplyMigration(m Migration) error {
 		} else {
 			return fmt.Errorf("migration %s has Driver set but no Connection", migration.Name)
 		}
+	}
+	if err := validateMigrationIdentifiers(migration); err != nil {
+		return fmt.Errorf("invalid identifier(s) in migration %s: %w", migration.Name, err)
 	}
 	queries, err := migration.ToSQL(dialect, true)
 	if err != nil {
@@ -1452,15 +1469,82 @@ func (d *Manager) ApplySQLMigration(path string) error {
 	return d.historyDriver.Save(history)
 }
 
-func acquireLock() error {
-	if _, err := os.Stat(lockFileName); err == nil {
-		return fmt.Errorf("migration lock already acquired")
+// lockInfo describes the metadata persisted inside the migration lock file so
+// that a stale lock (left behind by a crashed process) can be identified and,
+// when appropriate, safely reclaimed.
+type lockInfo struct {
+	PID        int       `json:"pid"`
+	Hostname   string    `json:"hostname"`
+	AcquiredAt time.Time `json:"acquired_at"`
+}
+
+// lockTimeout resolves the configured migration lock timeout (in seconds) as
+// a time.Duration. It best-effort loads the default configuration file; if no
+// configuration can be loaded, or the timeout is unset/non-positive, it
+// returns 0, meaning "never auto-expire the lock".
+func lockTimeout() time.Duration {
+	cfg, err := LoadConfig("")
+	if err != nil || cfg == nil {
+		return 0
 	}
-	f, err := os.Create(lockFileName)
+	if cfg.Migration.LockTimeout <= 0 {
+		return 0
+	}
+	return time.Duration(cfg.Migration.LockTimeout) * time.Second
+}
+
+// readLockInfo reads and parses the lock file metadata. If the file exists
+// but cannot be parsed (e.g. written by an older version of this tool), it
+// falls back to the file's modification time for age calculations.
+func readLockInfo(path string) (lockInfo, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
+		return lockInfo{}, err
+	}
+	var info lockInfo
+	if err := json.Unmarshal(data, &info); err != nil || info.AcquiredAt.IsZero() {
+		if fi, statErr := os.Stat(path); statErr == nil {
+			info.AcquiredAt = fi.ModTime()
+		}
+	}
+	return info, nil
+}
+
+func acquireLock() error {
+	if info, err := readLockInfo(lockFileName); err == nil {
+		age := time.Since(info.AcquiredAt)
+		timeout := lockTimeout()
+		if timeout > 0 && age > timeout {
+			logger.Warn().Msgf(
+				"Stale migration lock detected (pid=%d host=%s acquired_at=%s age=%s exceeds lock_timeout=%s); removing stale lock and proceeding",
+				info.PID, info.Hostname, info.AcquiredAt.Format(time.RFC3339), age, timeout,
+			)
+			if err := os.Remove(lockFileName); err != nil {
+				return fmt.Errorf("failed to remove stale migration lock: %w", err)
+			}
+		} else {
+			return fmt.Errorf(
+				"migration lock already acquired by pid=%d host=%s at %s (age=%s); remove %s manually if that process is no longer running",
+				info.PID, info.Hostname, info.AcquiredAt.Format(time.RFC3339), age, lockFileName,
+			)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect existing migration lock: %w", err)
+	}
+
+	hostname, _ := os.Hostname()
+	info := lockInfo{
+		PID:        os.Getpid(),
+		Hostname:   hostname,
+		AcquiredAt: time.Now(),
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal lock info: %w", err)
+	}
+	if err := os.WriteFile(lockFileName, data, 0644); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
-	f.Close()
 	return nil
 }
 
