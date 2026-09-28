@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,7 +23,7 @@ func NewSQLiteDriverFromDB(db *squealx.DB) *SQLiteDriver {
 	return &SQLiteDriver{db: db}
 }
 
-func NewSQLiteDriver(dbPath string) (*SQLiteDriver, error) {
+func NewSQLiteDriver(ctx context.Context, dbPath string) (*SQLiteDriver, error) {
 	db, err := sqlite.Open(dbPath, "sqlite3")
 	if err != nil {
 		// SQLite paths/DSNs don't normally carry credentials, but redact
@@ -30,13 +31,19 @@ func NewSQLiteDriver(dbPath string) (*SQLiteDriver, error) {
 		// "file:...?_auth_user=...&_auth_pass=..." DSN) is used.
 		return nil, fmt.Errorf("failed to open sqlite database %s: %w", redactDSN(dbPath), errors.New(redactDSN(err.Error())))
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping sqlite database %s: %w", redactDSN(dbPath), errors.New(redactDSN(err.Error())))
 	}
 	return &SQLiteDriver{db: db}, nil
 }
 
-func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
+func (s *SQLiteDriver) ApplySQL(ctx context.Context, migrations []string, args ...any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// cleanupCtx is used for the best-effort undo statements so they still
+	// reach the database even when ctx has already been cancelled or timed out.
+	cleanupCtx := context.WithoutCancel(ctx)
 	// Flatten statements
 	var stmts []string
 	for _, query := range migrations {
@@ -68,9 +75,9 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 			}
 			var err error
 			if len(args) > 0 {
-				_, err = s.db.NamedExec(q, args[0])
+				_, err = s.db.NamedExecContext(ctx, q, args[0])
 			} else {
-				_, err = s.db.Exec(q)
+				_, err = s.db.ExecContext(ctx, q)
 			}
 			if err != nil {
 				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
@@ -96,14 +103,14 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 	}
 
 	// Begin transaction
-	if _, err := s.db.Exec("BEGIN;"); err != nil {
+	if _, err := s.db.ExecContext(ctx, "BEGIN;"); err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
 	// Disable foreign key checks for rollback operations
 	if isRollback {
-		if _, err := s.db.Exec("PRAGMA foreign_keys = OFF;"); err != nil {
-			_, _ = s.db.Exec("ROLLBACK;")
+		if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys = OFF;"); err != nil {
+			_, _ = s.db.ExecContext(cleanupCtx, "ROLLBACK;")
 			return fmt.Errorf("failed to disable foreign key checks: %w", err)
 		}
 	}
@@ -114,19 +121,19 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 			continue
 		}
 		if len(args) > 0 {
-			if _, err := s.db.NamedExec(q, args[0]); err != nil {
+			if _, err := s.db.NamedExecContext(ctx, q, args[0]); err != nil {
 				if isRollback && s.isIgnorableError(err) {
 					continue // Skip errors for non-existent objects during rollback
 				}
-				_, _ = s.db.Exec("ROLLBACK;")
+				_, _ = s.db.ExecContext(cleanupCtx, "ROLLBACK;")
 				return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 			}
 		} else {
-			if _, err := s.db.Exec(q); err != nil {
+			if _, err := s.db.ExecContext(ctx, q); err != nil {
 				if isRollback && s.isIgnorableError(err) {
 					continue // Skip errors for non-existent objects during rollback
 				}
-				_, _ = s.db.Exec("ROLLBACK;")
+				_, _ = s.db.ExecContext(cleanupCtx, "ROLLBACK;")
 				return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 			}
 		}
@@ -134,14 +141,14 @@ func (s *SQLiteDriver) ApplySQL(migrations []string, args ...any) error {
 
 	// Re-enable foreign key checks if they were disabled
 	if isRollback {
-		if _, err := s.db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
-			_, _ = s.db.Exec("ROLLBACK;")
+		if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys = ON;"); err != nil {
+			_, _ = s.db.ExecContext(cleanupCtx, "ROLLBACK;")
 			return fmt.Errorf("failed to re-enable foreign key checks: %w", err)
 		}
 	}
 
-	if _, err := s.db.Exec("COMMIT;"); err != nil {
-		_, _ = s.db.Exec("ROLLBACK;")
+	if _, err := s.db.ExecContext(ctx, "COMMIT;"); err != nil {
+		_, _ = s.db.ExecContext(cleanupCtx, "ROLLBACK;")
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil

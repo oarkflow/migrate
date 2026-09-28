@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -26,7 +27,7 @@ func mai1n() {
 // configExample demonstrates loading configuration from file
 func configExample() {
 	// Create a manager using configuration file
-	manager, err := migrate.NewManagerFromConfig("migrate.json")
+	manager, err := migrate.NewManagerFromConfig(context.Background(), "migrate.json")
 	if err != nil {
 		log.Printf("Failed to create manager from config: %v", err)
 		return

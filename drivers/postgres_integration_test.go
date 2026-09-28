@@ -9,19 +9,20 @@ import (
 // provided in the environment. They exercise dollar-quoted functions, semicolons
 // in strings, and transactional rollback behavior.
 func TestPostgresApplySQL_WithDollarQuotedFunctionAndRollback(t *testing.T) {
+	ctx := t.Context()
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("skipping postgres integration test; set TEST_POSTGRES_DSN to run")
 	}
-	p, err := NewPostgresDriver(dsn)
+	p, err := NewPostgresDriver(ctx, dsn)
 	if err != nil {
 		t.Fatalf("failed to create postgres driver: %v", err)
 	}
 	defer func() { _ = p.DB().Close() }()
 
 	// Ensure clean state
-	_, _ = p.DB().Exec("DROP TABLE IF EXISTS tx_postgres_test;")
-	_, _ = p.DB().Exec("DROP FUNCTION IF EXISTS test_fn_increment(integer);")
+	_, _ = p.DB().ExecContext(ctx, "DROP TABLE IF EXISTS tx_postgres_test;")
+	_, _ = p.DB().ExecContext(ctx, "DROP FUNCTION IF EXISTS test_fn_increment(integer);")
 
 	// 1) Test rollback on failure (typo INSRT)
 	bad := `CREATE FUNCTION test_fn_increment(i integer) RETURNS integer AS $$
@@ -35,13 +36,13 @@ INSERT INTO tx_postgres_test (v) VALUES (1);
 
 INSRT INTO tx_postgres_test (v) VALUES (2);`
 
-	err = p.ApplySQL([]string{bad})
+	err = p.ApplySQL(ctx, []string{bad})
 	if err == nil {
 		t.Fatalf("expected error from malformed SQL but got nil")
 	}
 	// Verify nothing committed: no table
 	var count int
-	err = p.DB().QueryRow("SELECT count(*) FROM information_schema.tables WHERE table_name='tx_postgres_test'").Scan(&count)
+	err = p.DB().QueryRowContext(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_name='tx_postgres_test'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed check for table existence: %v", err)
 	}
@@ -58,18 +59,18 @@ $$ LANGUAGE plpgsql;
 
 CREATE TABLE tx_postgres_test (id serial PRIMARY KEY, v integer);
 INSERT INTO tx_postgres_test (v) VALUES (5);`
-	if err := p.ApplySQL([]string{succ}); err != nil {
+	if err := p.ApplySQL(ctx, []string{succ}); err != nil {
 		t.Fatalf("expected success applying SQL, got %v", err)
 	}
 	// verify function exists and row is present
-	err = p.DB().QueryRow("SELECT count(*) FROM pg_proc WHERE proname='test_fn_increment'").Scan(&count)
+	err = p.DB().QueryRowContext(ctx, "SELECT count(*) FROM pg_proc WHERE proname='test_fn_increment'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query pg_proc: %v", err)
 	}
 	if count == 0 {
 		t.Fatalf("expected function 'test_fn_increment' to exist after successful migration")
 	}
-	err = p.DB().QueryRow("SELECT count(*) FROM tx_postgres_test").Scan(&count)
+	err = p.DB().QueryRowContext(ctx, "SELECT count(*) FROM tx_postgres_test").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query tx_postgres_test: %v", err)
 	}
@@ -78,6 +79,6 @@ INSERT INTO tx_postgres_test (v) VALUES (5);`
 	}
 
 	// cleanup
-	_, _ = p.DB().Exec("DROP TABLE IF EXISTS tx_postgres_test;")
-	_, _ = p.DB().Exec("DROP FUNCTION IF EXISTS test_fn_increment(integer);")
+	_, _ = p.DB().ExecContext(ctx, "DROP TABLE IF EXISTS tx_postgres_test;")
+	_, _ = p.DB().ExecContext(ctx, "DROP FUNCTION IF EXISTS test_fn_increment(integer);")
 }

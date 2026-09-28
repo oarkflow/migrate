@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -37,11 +38,11 @@ type MigrationHistory struct {
 
 // HistoryDriver defines an interface to store migration history.
 type HistoryDriver interface {
-	Save(history MigrationHistory) error
-	Load() ([]MigrationHistory, error)
-	ValidateStorage() error
+	Save(ctx context.Context, history MigrationHistory) error
+	Load(ctx context.Context) ([]MigrationHistory, error)
+	ValidateStorage(ctx context.Context) error
 	// New method to remove a migration history record.
-	Rollback(history ...MigrationHistory) error
+	Rollback(ctx context.Context, history ...MigrationHistory) error
 }
 
 // FileHistoryDriver implements the HistoryDriver interface using a file.
@@ -56,8 +57,11 @@ func NewFileHistoryDriver(filePath string) *FileHistoryDriver {
 	}
 }
 
-func (f *FileHistoryDriver) Save(history MigrationHistory) error {
-	histories, err := f.Load()
+func (f *FileHistoryDriver) Save(ctx context.Context, history MigrationHistory) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	histories, err := f.Load(ctx)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -69,7 +73,10 @@ func (f *FileHistoryDriver) Save(history MigrationHistory) error {
 	return os.WriteFile(f.filePath, data, 0644)
 }
 
-func (f *FileHistoryDriver) Load() ([]MigrationHistory, error) {
+func (f *FileHistoryDriver) Load(ctx context.Context) ([]MigrationHistory, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(f.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,7 +91,10 @@ func (f *FileHistoryDriver) Load() ([]MigrationHistory, error) {
 	return histories, nil
 }
 
-func (f *FileHistoryDriver) ValidateStorage() error {
+func (f *FileHistoryDriver) ValidateStorage(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// If file does not exist, create an empty storage file.
 	if _, err := os.Stat(f.filePath); os.IsNotExist(err) {
 		empty := []byte("[]")
@@ -115,7 +125,7 @@ func NewDB(dialect, dsn string) (*squealx.DB, error) {
 	}
 }
 
-func SetupMigrationHistoryTable(dialect string, db *squealx.DB, table string) error {
+func SetupMigrationHistoryTable(ctx context.Context, dialect string, db *squealx.DB, table string) error {
 	dial := GetDialect(dialect)
 	stmt := CreateTable{
 		Name: table,
@@ -130,7 +140,10 @@ func SetupMigrationHistoryTable(dialect string, db *squealx.DB, table string) er
 	}
 	existsQuery := dial.TableExistsSQL(table)
 	var exists bool
-	err := db.Select(&exists, existsQuery)
+	// GetContext (not SelectContext) because the destination is a scalar: the
+	// context-less Select used to route non-slice destinations to Get itself,
+	// while SelectContext requires a slice.
+	err := db.GetContext(ctx, &exists, existsQuery)
 	if err != nil {
 		return err
 	}
@@ -146,7 +159,7 @@ func SetupMigrationHistoryTable(dialect string, db *squealx.DB, table string) er
 			if q == "" {
 				continue
 			}
-			if _, err := db.Exec(q); err != nil {
+			if _, err := db.ExecContext(ctx, q); err != nil {
 				return err
 			}
 		}
@@ -165,7 +178,7 @@ func NewDatabaseHistoryDriverFromDB(db *squealx.DB, dialect, table string) (Hist
 }
 
 // NewDatabaseHistoryDriver creates a new database history driver using squealx.
-func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDriver, error) {
+func NewDatabaseHistoryDriver(ctx context.Context, dialect, dsn string, tables ...string) (HistoryDriver, error) {
 	db, err := NewDB(dialect, dsn)
 	if err != nil {
 		return nil, err
@@ -174,14 +187,14 @@ func NewDatabaseHistoryDriver(dialect, dsn string, tables ...string) (HistoryDri
 	if len(tables) > 0 {
 		table = tables[0]
 	}
-	err = SetupMigrationHistoryTable(dialect, db, table)
+	err = SetupMigrationHistoryTable(ctx, dialect, db, table)
 	if err != nil {
 		return nil, err
 	}
 	return &DatabaseHistoryDriver{db: db, dialect: dialect, table: table}, nil
 }
 
-func (d *DatabaseHistoryDriver) Save(history MigrationHistory) error {
+func (d *DatabaseHistoryDriver) Save(ctx context.Context, history MigrationHistory) error {
 	dial := GetDialect(d.dialect)
 	cols := []string{"name", "version", "description", "checksum", "applied_at"}
 	vals := []any{history.Name, history.Version, history.Description, history.Checksum, history.AppliedAt.Format(time.RFC3339)}
@@ -189,11 +202,11 @@ func (d *DatabaseHistoryDriver) Save(history MigrationHistory) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.db.NamedExec(query, args)
+	_, err = d.db.NamedExecContext(ctx, query, args)
 	return err
 }
 
-func (d *DatabaseHistoryDriver) Load() ([]MigrationHistory, error) {
+func (d *DatabaseHistoryDriver) Load(ctx context.Context) ([]MigrationHistory, error) {
 	var histories []MigrationHistory
 	// Use parameterized query to prevent SQL injection
 	query := `SELECT id, name, version, description, checksum, applied_at FROM migrations ORDER BY applied_at ASC`
@@ -204,19 +217,22 @@ func (d *DatabaseHistoryDriver) Load() ([]MigrationHistory, error) {
 		}
 		query = fmt.Sprintf(`SELECT id, name, version, description, checksum, applied_at FROM "%s" ORDER BY applied_at ASC`, d.table)
 	}
-	err := d.db.Select(&histories, query)
+	err := d.db.SelectContext(ctx, &histories, query)
 	if err != nil {
 		return nil, err
 	}
 	return histories, nil
 }
 
-func (d *DatabaseHistoryDriver) ValidateStorage() error {
-	return SetupMigrationHistoryTable(d.dialect, d.db, d.table)
+func (d *DatabaseHistoryDriver) ValidateStorage(ctx context.Context) error {
+	return SetupMigrationHistoryTable(ctx, d.dialect, d.db, d.table)
 }
 
 // FileHistoryDriver: implement Rollback by removing the record from the file.
-func (f *FileHistoryDriver) Rollback(histories ...MigrationHistory) error {
+func (f *FileHistoryDriver) Rollback(ctx context.Context, histories ...MigrationHistory) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(histories)
 	if err != nil {
 		return err
@@ -225,7 +241,7 @@ func (f *FileHistoryDriver) Rollback(histories ...MigrationHistory) error {
 }
 
 // DatabaseHistoryDriver: implement Rollback by executing a DELETE query.
-func (d *DatabaseHistoryDriver) Rollback(histories ...MigrationHistory) error {
+func (d *DatabaseHistoryDriver) Rollback(ctx context.Context, histories ...MigrationHistory) error {
 	// Validate table name to prevent SQL injection
 	if !isValidIdentifier(d.table) {
 		return fmt.Errorf("invalid table name: %s", d.table)
@@ -234,12 +250,12 @@ func (d *DatabaseHistoryDriver) Rollback(histories ...MigrationHistory) error {
 	// Simpler and portable approach: delete all rows and re-insert the remaining
 	// histories using the existing Save method which handles parameterization
 	query := fmt.Sprintf(`DELETE FROM "%s"`, d.table)
-	if _, err := d.db.Exec(query); err != nil {
+	if _, err := d.db.ExecContext(ctx, query); err != nil {
 		return err
 	}
 
 	for _, h := range histories {
-		if err := d.Save(h); err != nil {
+		if err := d.Save(ctx, h); err != nil {
 			return err
 		}
 	}

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/oarkflow/squealx"
 
@@ -48,7 +51,7 @@ func extractConfigFromArgs(args []string) (string, []string) {
 	return cfg, out
 }
 
-func Run(dialect string, cfg ...Config) error {
+func Run(ctx context.Context, dialect string, cfg ...Config) error {
 	var config Config
 	if len(cfg) > 0 {
 		config = cfg[0]
@@ -59,14 +62,14 @@ func Run(dialect string, cfg ...Config) error {
 		if _, err := os.Stat(config.ConfigFile); err != nil {
 			return err
 		}
-		manager, err := migrate.NewManagerFromConfig(config.ConfigFile)
+		manager, err := migrate.NewManagerFromConfig(ctx, config.ConfigFile)
 		if err != nil {
 			return err
 		}
 		if dialect != "" {
 			manager.SetDialect(dialect)
 		}
-		manager.Run()
+		manager.Run(ctx)
 		return nil
 	}
 
@@ -76,7 +79,7 @@ func Run(dialect string, cfg ...Config) error {
 		if _, err := os.Stat(cfgPath); err != nil {
 			return err
 		}
-		manager, err := migrate.NewManagerFromConfig(cfgPath)
+		manager, err := migrate.NewManagerFromConfig(ctx, cfgPath)
 		if err != nil {
 			return err
 		}
@@ -85,21 +88,21 @@ func Run(dialect string, cfg ...Config) error {
 		}
 		// Replace os.Args so CLI won't see the --config flag
 		os.Args = filtered
-		manager.Run()
+		manager.Run(ctx)
 		return nil
 	}
 
 	// If no explicit config is provided, auto-load default migrate.json when present.
 	// This keeps plain `migrator ... migrate` behavior intuitive.
 	if _, err := os.Stat("migrate.json"); err == nil {
-		manager, err := migrate.NewManagerFromConfig("migrate.json")
+		manager, err := migrate.NewManagerFromConfig(ctx, "migrate.json")
 		if err != nil {
 			return err
 		}
 		if dialect != "" {
 			manager.SetDialect(dialect)
 		}
-		manager.Run()
+		manager.Run(ctx)
 		return nil
 	}
 
@@ -107,7 +110,7 @@ func Run(dialect string, cfg ...Config) error {
 	if config.Config.Driver != "" {
 		dsn := config.ToString()
 		if dsn != "" {
-			driver, err := migrate.NewDriver(config.Config.Driver, dsn)
+			driver, err := migrate.NewDriver(ctx, config.Config.Driver, dsn)
 			if err != nil {
 				return err
 			}
@@ -116,7 +119,7 @@ func Run(dialect string, cfg ...Config) error {
 			if config.MigrationTable != "" {
 				tables = append(tables, config.MigrationTable)
 			}
-			historyDriver, err := migrate.NewHistoryDriver("db", dialect, dsn, tables...)
+			historyDriver, err := migrate.NewHistoryDriver(ctx, "db", dialect, dsn, tables...)
 			if err != nil {
 				return err
 			}
@@ -126,13 +129,19 @@ func Run(dialect string, cfg ...Config) error {
 	if config.MigrationDir != "" {
 		opts = append(opts, migrate.WithMigrationDir(config.MigrationDir))
 	}
-	manager := migrate.NewManager(opts...)
+	manager := migrate.NewManager(append(opts, migrate.WithContext(ctx))...)
 	manager.SetDialect(dialect)
-	manager.Run()
+	manager.Run(ctx)
 	return nil
 }
 
 func main() {
+	// A single root context for the whole process: Ctrl+C / SIGTERM cancels it,
+	// which cancels any in-flight migration/rollback/seed all the way down to
+	// the database calls instead of leaving work hanging.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Strip --config/-c early so the CLI doesn't see it
 	cfgPath, filtered := extractConfigFromArgs(os.Args)
 	if cfgPath != "" {
@@ -142,7 +151,7 @@ func main() {
 			os.Exit(1)
 		}
 		os.Args = filtered
-		if err := Run("", Config{ConfigFile: cfgPath}); err != nil {
+		if err := Run(ctx, "", Config{ConfigFile: cfgPath}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -150,7 +159,7 @@ func main() {
 	}
 
 	// No config file; pass through and let Run handle other configuration
-	if err := Run(""); err != nil {
+	if err := Run(ctx, ""); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

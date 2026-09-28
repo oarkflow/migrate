@@ -7,11 +7,12 @@ import (
 )
 
 func TestSQLiteTransactionalRollbackOnFailure(t *testing.T) {
+	ctx := t.Context()
 	// Create temporary SQLite database file
 	tmpDir := os.TempDir()
 	dbPath := filepath.Join(tmpDir, "migrate_tx_test.db")
 	_ = os.Remove(dbPath)
-	drv, err := NewSQLiteDriver(dbPath)
+	drv, err := NewSQLiteDriver(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("failed to create sqlite driver: %v", err)
 	}
@@ -22,13 +23,13 @@ func TestSQLiteTransactionalRollbackOnFailure(t *testing.T) {
 
 	// First: ensure that a failing statement causes rollback (table should not exist)
 	bad := "CREATE TABLE tx_test (id INTEGER PRIMARY KEY); INSERT INTO tx_test (id) VALUES (1); INSRT INTO tx_test (id) VALUES (2);"
-	err = drv.ApplySQL([]string{bad})
+	err = drv.ApplySQL(ctx, []string{bad})
 	if err == nil {
 		t.Fatalf("expected error from malformed SQL but got nil")
 	}
 	// Check table does not exist (transaction should rollback)
 	var count int
-	err = drv.DB().QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tx_test'").Scan(&count)
+	err = drv.DB().QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tx_test'").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query sqlite_master: %v", err)
 	}
@@ -38,10 +39,10 @@ func TestSQLiteTransactionalRollbackOnFailure(t *testing.T) {
 
 	// Second: successful multi-statement transaction should commit
 	succ := "CREATE TABLE tx_ok (id INTEGER PRIMARY KEY); INSERT INTO tx_ok (id) VALUES (1);"
-	if err := drv.ApplySQL([]string{succ}); err != nil {
+	if err := drv.ApplySQL(ctx, []string{succ}); err != nil {
 		t.Fatalf("expected success applying SQL, got %v", err)
 	}
-	err = drv.DB().QueryRow("SELECT count(*) FROM tx_ok").Scan(&count)
+	err = drv.DB().QueryRowContext(ctx, "SELECT count(*) FROM tx_ok").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to query tx_ok: %v", err)
 	}

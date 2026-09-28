@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,18 +23,24 @@ func NewMySQLDriverFromDB(db *squealx.DB) *MySQLDriver {
 	return &MySQLDriver{db: db}
 }
 
-func NewMySQLDriver(dsn string) (*MySQLDriver, error) {
+func NewMySQLDriver(ctx context.Context, dsn string) (*MySQLDriver, error) {
 	db, err := mysql.Open(dsn, "mysql")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open connection to %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping database %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
 	return &MySQLDriver{db: db}, nil
 }
 
-func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
+func (m *MySQLDriver) ApplySQL(ctx context.Context, migrations []string, args ...any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// cleanupCtx is used for the best-effort undo statements so they still
+	// reach the database even when ctx has already been cancelled or timed out.
+	cleanupCtx := context.WithoutCancel(ctx)
 	// Flatten statements
 	var stmts []string
 	for _, query := range migrations {
@@ -65,9 +72,9 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 			}
 			var err error
 			if len(args) > 0 {
-				_, err = m.db.NamedExec(q, args[0])
+				_, err = m.db.NamedExecContext(ctx, q, args[0])
 			} else {
-				_, err = m.db.Exec(q)
+				_, err = m.db.ExecContext(ctx, q)
 			}
 			if err != nil {
 				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
@@ -93,14 +100,14 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 	}
 
 	// Start transaction
-	if _, err := m.db.Exec("START TRANSACTION;"); err != nil {
+	if _, err := m.db.ExecContext(ctx, "START TRANSACTION;"); err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 
 	// Disable foreign key checks for rollback operations
 	if isRollback {
-		if _, err := m.db.Exec("SET FOREIGN_KEY_CHECKS = 0;"); err != nil {
-			_, _ = m.db.Exec("ROLLBACK;")
+		if _, err := m.db.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0;"); err != nil {
+			_, _ = m.db.ExecContext(cleanupCtx, "ROLLBACK;")
 			return fmt.Errorf("failed to disable foreign key checks: %w", err)
 		}
 	}
@@ -111,19 +118,19 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 			continue
 		}
 		if len(args) > 0 {
-			if _, err := m.db.NamedExec(q, args[0]); err != nil {
+			if _, err := m.db.NamedExecContext(ctx, q, args[0]); err != nil {
 				if isRollback && m.isIgnorableError(err) {
 					continue // Skip errors for non-existent objects during rollback
 				}
-				_, _ = m.db.Exec("ROLLBACK;")
+				_, _ = m.db.ExecContext(cleanupCtx, "ROLLBACK;")
 				return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 			}
 		} else {
-			if _, err := m.db.Exec(q); err != nil {
+			if _, err := m.db.ExecContext(ctx, q); err != nil {
 				if isRollback && m.isIgnorableError(err) {
 					continue // Skip errors for non-existent objects during rollback
 				}
-				_, _ = m.db.Exec("ROLLBACK;")
+				_, _ = m.db.ExecContext(cleanupCtx, "ROLLBACK;")
 				return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 			}
 		}
@@ -131,14 +138,14 @@ func (m *MySQLDriver) ApplySQL(migrations []string, args ...any) error {
 
 	// Re-enable foreign key checks if they were disabled
 	if isRollback {
-		if _, err := m.db.Exec("SET FOREIGN_KEY_CHECKS = 1;"); err != nil {
-			_, _ = m.db.Exec("ROLLBACK;")
+		if _, err := m.db.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 1;"); err != nil {
+			_, _ = m.db.ExecContext(cleanupCtx, "ROLLBACK;")
 			return fmt.Errorf("failed to re-enable foreign key checks: %w", err)
 		}
 	}
 
-	if _, err := m.db.Exec("COMMIT;"); err != nil {
-		_, _ = m.db.Exec("ROLLBACK;")
+	if _, err := m.db.ExecContext(ctx, "COMMIT;"); err != nil {
+		_, _ = m.db.ExecContext(cleanupCtx, "ROLLBACK;")
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil

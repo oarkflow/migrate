@@ -43,5 +43,5 @@ func (c *MakeMigrationCommand) Handle(ctx contracts.Context) error {
 		return errors.New("migration name is required")
 	}
 	raw := ctx.Option("raw") == "true" || ctx.Option("raw") == "1"
-	return c.Driver.CreateMigrationFile(name, raw)
+	return c.Driver.CreateMigrationFile(c.Driver.Context(), name, raw)
 }

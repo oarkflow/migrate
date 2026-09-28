@@ -47,5 +47,5 @@ func (c *ResetCommand) Handle(ctx contracts.Context) error {
 			}
 		}
 	}
-	return c.Driver.ResetMigrations()
+	return c.Driver.ResetMigrations(c.Driver.Context())
 }

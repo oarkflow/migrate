@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,18 +23,24 @@ func NewPostgresDriverFromDB(db *squealx.DB) *PostgresDriver {
 	return &PostgresDriver{db: db}
 }
 
-func NewPostgresDriver(dsn string) (*PostgresDriver, error) {
+func NewPostgresDriver(ctx context.Context, dsn string) (*PostgresDriver, error) {
 	db, err := postgres.Open(dsn, "postgres")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open connection to %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping database %s: %w", redactDSN(dsn), errors.New(redactDSN(err.Error())))
 	}
 	return &PostgresDriver{db: db}, nil
 }
 
-func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
+func (p *PostgresDriver) ApplySQL(ctx context.Context, migrations []string, args ...any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// cleanupCtx is used for the best-effort undo statements so they still
+	// reach the database even when ctx has already been cancelled or timed out.
+	cleanupCtx := context.WithoutCancel(ctx)
 	// Flatten statements
 	var stmts []string
 	for _, query := range migrations {
@@ -77,11 +84,11 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 				continue
 			}
 			if len(args) > 0 {
-				if _, err := p.db.NamedExec(q, args[0]); err != nil {
+				if _, err := p.db.NamedExecContext(ctx, q, args[0]); err != nil {
 					return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 				}
 			} else {
-				if _, err := p.db.Exec(q); err != nil {
+				if _, err := p.db.ExecContext(ctx, q); err != nil {
 					return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 				}
 			}
@@ -106,9 +113,9 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 			}
 			var err error
 			if len(args) > 0 {
-				_, err = p.db.NamedExec(q, args[0])
+				_, err = p.db.NamedExecContext(ctx, q, args[0])
 			} else {
-				_, err = p.db.Exec(q)
+				_, err = p.db.ExecContext(ctx, q)
 			}
 			if err != nil {
 				fmt.Printf("[force] warning: statement failed: %s: %v\n", q, err)
@@ -124,14 +131,14 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 	}
 
 	// Begin transaction
-	if _, err := p.db.Exec("BEGIN;"); err != nil {
+	if _, err := p.db.ExecContext(ctx, "BEGIN;"); err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
 	// Disable foreign key checks for rollback operations
 	if isRollback {
-		if _, err := p.db.Exec("SET session_replication_role = replica;"); err != nil {
-			_, _ = p.db.Exec("ROLLBACK;")
+		if _, err := p.db.ExecContext(ctx, "SET session_replication_role = replica;"); err != nil {
+			_, _ = p.db.ExecContext(cleanupCtx, "ROLLBACK;")
 			return fmt.Errorf("failed to disable foreign key constraints: %w", err)
 		}
 	}
@@ -143,19 +150,19 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 			continue
 		}
 		if len(args) > 0 {
-			if _, err := p.db.NamedExec(q, args[0]); err != nil {
+			if _, err := p.db.NamedExecContext(ctx, q, args[0]); err != nil {
 				if isRollback && p.isIgnorableError(err) {
 					continue // Skip errors for non-existent objects during rollback
 				}
-				_, _ = p.db.Exec("ROLLBACK;")
+				_, _ = p.db.ExecContext(cleanupCtx, "ROLLBACK;")
 				return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 			}
 		} else {
-			if _, err := p.db.Exec(q); err != nil {
+			if _, err := p.db.ExecContext(ctx, q); err != nil {
 				if isRollback && p.isIgnorableError(err) {
 					continue // Skip errors for non-existent objects during rollback
 				}
-				_, _ = p.db.Exec("ROLLBACK;")
+				_, _ = p.db.ExecContext(cleanupCtx, "ROLLBACK;")
 				return fmt.Errorf("failed to execute query [%s]: %w", q, err)
 			}
 		}
@@ -163,15 +170,15 @@ func (p *PostgresDriver) ApplySQL(migrations []string, args ...any) error {
 
 	// Re-enable foreign key checks if they were disabled
 	if isRollback {
-		if _, err := p.db.Exec("SET session_replication_role = DEFAULT;"); err != nil {
-			_, _ = p.db.Exec("ROLLBACK;")
+		if _, err := p.db.ExecContext(ctx, "SET session_replication_role = DEFAULT;"); err != nil {
+			_, _ = p.db.ExecContext(cleanupCtx, "ROLLBACK;")
 			return fmt.Errorf("failed to re-enable foreign key constraints: %w", err)
 		}
 	}
 
 	// Commit
-	if _, err := p.db.Exec("COMMIT;"); err != nil {
-		_, _ = p.db.Exec("ROLLBACK;")
+	if _, err := p.db.ExecContext(ctx, "COMMIT;"); err != nil {
+		_, _ = p.db.ExecContext(cleanupCtx, "ROLLBACK;")
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil

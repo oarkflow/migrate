@@ -9,20 +9,22 @@ import (
 
 func newSQLiteWorkflowManager(t *testing.T) *Manager {
 	t.Helper()
+	ctx := t.Context()
 	dir := t.TempDir()
 	migrationDir := filepath.Join(dir, "migrations")
 	seedDir := filepath.Join(migrationDir, "seeds")
 	dbPath := filepath.Join(dir, "workflow.db")
 
-	driver, err := NewDriver(DialectSQLite, dbPath)
+	driver, err := NewDriver(ctx, DialectSQLite, dbPath)
 	if err != nil {
 		t.Fatalf("NewDriver sqlite: %v", err)
 	}
-	historyDriver, err := NewHistoryDriver("db", DialectSQLite, dbPath, "migrations")
+	historyDriver, err := NewHistoryDriver(ctx, "db", DialectSQLite, dbPath, "migrations")
 	if err != nil {
 		t.Fatalf("NewHistoryDriver sqlite: %v", err)
 	}
 	return NewManager(
+		WithContext(ctx),
 		WithMigrationDir(migrationDir),
 		WithSeedDir(seedDir),
 		WithDialect(DialectSQLite),
@@ -88,6 +90,7 @@ Migration "002_create_projects" {
 }
 
 func TestManagerMultiRootMigrateRollbackResetSQLite(t *testing.T) {
+	ctx := t.Context()
 	manager := newSQLiteWorkflowManager(t)
 	migrationFile := filepath.Join(manager.MigrationDir(), "001_multi.bcl")
 	writeTestFile(t, migrationFile, testMultiRootMigrationBCL())
@@ -105,7 +108,7 @@ func TestManagerMultiRootMigrateRollbackResetSQLite(t *testing.T) {
 		t.Fatalf("ParseMigrationsBCL: %v", err)
 	}
 	for _, migration := range migrations {
-		if err := manager.ApplyMigration(migration); err != nil {
+		if err := manager.ApplyMigration(ctx, migration); err != nil {
 			t.Fatalf("ApplyMigration(%s): %v", migration.Name, err)
 		}
 	}
@@ -113,7 +116,7 @@ func TestManagerMultiRootMigrateRollbackResetSQLite(t *testing.T) {
 	assertSQLiteTableExists(t, manager, "accounts", true)
 	assertSQLiteTableExists(t, manager, "projects", true)
 
-	histories, err := manager.historyDriver.Load()
+	histories, err := manager.historyDriver.Load(ctx)
 	if err != nil {
 		t.Fatalf("history Load: %v", err)
 	}
@@ -121,13 +124,13 @@ func TestManagerMultiRootMigrateRollbackResetSQLite(t *testing.T) {
 		t.Fatalf("len(histories) = %d, want 2", len(histories))
 	}
 
-	if err := manager.RollbackMigration(1); err != nil {
+	if err := manager.RollbackMigration(ctx, 1); err != nil {
 		t.Fatalf("RollbackMigration: %v", err)
 	}
 	assertSQLiteTableExists(t, manager, "accounts", true)
 	assertSQLiteTableExists(t, manager, "projects", false)
 
-	histories, err = manager.historyDriver.Load()
+	histories, err = manager.historyDriver.Load(ctx)
 	if err != nil {
 		t.Fatalf("history Load after rollback: %v", err)
 	}
@@ -135,12 +138,12 @@ func TestManagerMultiRootMigrateRollbackResetSQLite(t *testing.T) {
 		t.Fatalf("histories after rollback = %#v", histories)
 	}
 
-	if err := manager.ResetMigrations(); err != nil {
+	if err := manager.ResetMigrations(ctx); err != nil {
 		t.Fatalf("ResetMigrations: %v", err)
 	}
 	assertSQLiteTableExists(t, manager, "accounts", false)
 
-	histories, err = manager.historyDriver.Load()
+	histories, err = manager.historyDriver.Load(ctx)
 	if err != nil {
 		t.Fatalf("history Load after reset: %v", err)
 	}
@@ -150,8 +153,9 @@ func TestManagerMultiRootMigrateRollbackResetSQLite(t *testing.T) {
 }
 
 func TestManagerRunSeedsMultiRootSQLite(t *testing.T) {
+	ctx := t.Context()
 	manager := newSQLiteWorkflowManager(t)
-	if err := manager.dbDriver.ApplySQL([]string{`CREATE TABLE seed_targets (id TEXT PRIMARY KEY, label TEXT NOT NULL);`}); err != nil {
+	if err := manager.dbDriver.ApplySQL(ctx, []string{`CREATE TABLE seed_targets (id TEXT PRIMARY KEY, label TEXT NOT NULL);`}); err != nil {
 		t.Fatalf("create seed_targets: %v", err)
 	}
 	seedFile := filepath.Join(manager.SeedDir(), "multi_seed.bcl")
@@ -179,12 +183,12 @@ Seed "second_seed" {
 }
 `)
 
-	if err := manager.RunSeeds(false, false, seedFile); err != nil {
+	if err := manager.RunSeeds(ctx, false, false, seedFile); err != nil {
 		t.Fatalf("RunSeeds: %v", err)
 	}
 
 	var count int
-	if err := manager.dbDriver.DB().Select(&count, `SELECT COUNT(*) FROM seed_targets`); err != nil {
+	if err := manager.dbDriver.DB().GetContext(ctx, &count, `SELECT COUNT(*) FROM seed_targets`); err != nil {
 		t.Fatalf("count seed rows: %v", err)
 	}
 	if count != 2 {
@@ -193,6 +197,7 @@ Seed "second_seed" {
 }
 
 func TestManagerMixedRawSQLAndBCLResetSQLite(t *testing.T) {
+	ctx := t.Context()
 	manager := newSQLiteWorkflowManager(t)
 	rawFile := filepath.Join(manager.MigrationDir(), "001_raw.sql")
 	writeTestFile(t, rawFile, `
@@ -226,20 +231,20 @@ Migration "002_create_bcl_items" {
 `
 	writeTestFile(t, filepath.Join(manager.MigrationDir(), "002_bcl.bcl"), bclSrc)
 
-	if err := manager.ApplySQLMigration(rawFile); err != nil {
+	if err := manager.ApplySQLMigration(ctx, rawFile); err != nil {
 		t.Fatalf("ApplySQLMigration: %v", err)
 	}
 	migration, err := ParseMigrationBCL([]byte(bclSrc))
 	if err != nil {
 		t.Fatalf("ParseMigrationBCL: %v", err)
 	}
-	if err := manager.ApplyMigration(migration); err != nil {
+	if err := manager.ApplyMigration(ctx, migration); err != nil {
 		t.Fatalf("ApplyMigration: %v", err)
 	}
 	assertSQLiteTableExists(t, manager, "raw_items", true)
 	assertSQLiteTableExists(t, manager, "bcl_items", true)
 
-	if err := manager.ResetMigrations(); err != nil {
+	if err := manager.ResetMigrations(ctx); err != nil {
 		t.Fatalf("ResetMigrations: %v", err)
 	}
 	assertSQLiteTableExists(t, manager, "raw_items", false)
@@ -280,10 +285,11 @@ DROP TABLE IF EXISTS raw_command_items;
 }
 
 func TestValidateMigrationsRejectsRawSQLWithoutUpSection(t *testing.T) {
+	ctx := t.Context()
 	manager := newSQLiteWorkflowManager(t)
 	writeTestFile(t, filepath.Join(manager.MigrationDir(), "001_bad.sql"), `CREATE TABLE bad_raw (id INTEGER);`)
 
-	err := manager.ValidateMigrations()
+	err := manager.ValidateMigrations(ctx)
 	if err == nil {
 		t.Fatal("expected raw SQL validation error")
 	}
@@ -293,17 +299,18 @@ func TestValidateMigrationsRejectsRawSQLWithoutUpSection(t *testing.T) {
 }
 
 func TestRollbackRawSQLWithoutDownFailsUnlessForced(t *testing.T) {
+	ctx := t.Context()
 	manager := newSQLiteWorkflowManager(t)
 	rawFile := filepath.Join(manager.MigrationDir(), "001_raw.sql")
 	writeTestFile(t, rawFile, `
 -- migration-up
 CREATE TABLE raw_without_down (id INTEGER PRIMARY KEY);
 `)
-	if err := manager.ApplySQLMigration(rawFile); err != nil {
+	if err := manager.ApplySQLMigration(ctx, rawFile); err != nil {
 		t.Fatalf("ApplySQLMigration: %v", err)
 	}
 
-	err := manager.RollbackMigration(1)
+	err := manager.RollbackMigration(ctx, 1)
 	if err == nil {
 		t.Fatal("expected rollback error for missing down section")
 	}
@@ -311,7 +318,7 @@ CREATE TABLE raw_without_down (id INTEGER PRIMARY KEY);
 		t.Fatalf("error = %v", err)
 	}
 
-	histories, err := manager.historyDriver.Load()
+	histories, err := manager.historyDriver.Load(ctx)
 	if err != nil {
 		t.Fatalf("history Load: %v", err)
 	}
@@ -320,10 +327,10 @@ CREATE TABLE raw_without_down (id INTEGER PRIMARY KEY);
 	}
 
 	manager.Force = true
-	if err := manager.RollbackMigration(1); err != nil {
+	if err := manager.RollbackMigration(ctx, 1); err != nil {
 		t.Fatalf("forced RollbackMigration: %v", err)
 	}
-	histories, err = manager.historyDriver.Load()
+	histories, err = manager.historyDriver.Load(ctx)
 	if err != nil {
 		t.Fatalf("history Load after forced rollback: %v", err)
 	}
@@ -333,8 +340,9 @@ CREATE TABLE raw_without_down (id INTEGER PRIMARY KEY);
 }
 
 func TestRunSeedsReturnsApplyErrorUnlessForced(t *testing.T) {
+	ctx := t.Context()
 	manager := newSQLiteWorkflowManager(t)
-	if err := manager.dbDriver.ApplySQL([]string{`CREATE TABLE seed_unique (id TEXT PRIMARY KEY);`}); err != nil {
+	if err := manager.dbDriver.ApplySQL(ctx, []string{`CREATE TABLE seed_unique (id TEXT PRIMARY KEY);`}); err != nil {
 		t.Fatalf("create seed_unique: %v", err)
 	}
 	seedFile := filepath.Join(manager.SeedDir(), "bad_seed.bcl")
@@ -347,7 +355,7 @@ Seed "bad_seed" {
   rows = 2
 }
 `)
-	err := manager.RunSeeds(false, false, seedFile)
+	err := manager.RunSeeds(ctx, false, false, seedFile)
 	if err == nil {
 		t.Fatal("expected seed apply error")
 	}
@@ -356,7 +364,7 @@ Seed "bad_seed" {
 	}
 
 	manager.Force = true
-	if err := manager.RunSeeds(false, false, seedFile); err != nil {
+	if err := manager.RunSeeds(ctx, false, false, seedFile); err != nil {
 		t.Fatalf("forced RunSeeds: %v", err)
 	}
 }
@@ -489,9 +497,10 @@ func (c testContext) Option(key string) string {
 
 func assertSQLiteTableExists(t *testing.T, manager *Manager, table string, want bool) {
 	t.Helper()
+	ctx := t.Context()
 	var exists bool
 	query := GetDialect(DialectSQLite).TableExistsSQL(table)
-	if err := manager.dbDriver.DB().Select(&exists, query); err != nil {
+	if err := manager.dbDriver.DB().GetContext(ctx, &exists, query); err != nil {
 		t.Fatalf("table exists query for %s: %v", table, err)
 	}
 	if exists != want {

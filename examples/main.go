@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -8,11 +9,13 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
+
 	// Example using the new configuration system
 	fmt.Println("Starting migration tool with configuration...")
 
 	// Try to load configuration from file
-	manager, err := migrate.NewManagerFromConfig("migrate.json")
+	manager, err := migrate.NewManagerFromConfig(ctx, "migrate.json")
 	if err != nil {
 		log.Printf("Failed to load from config file, using defaults: %v", err)
 
@@ -23,7 +26,7 @@ func main() {
 		config.Database.Password = "postgres"
 		config.Database.Database = "sujit"
 
-		manager = migrate.NewManager(migrate.WithConfig(config))
+		manager = migrate.NewManager(migrate.WithContext(ctx), migrate.WithConfig(config))
 	}
 
 	fmt.Printf("Manager configured with:\n")
@@ -32,5 +35,5 @@ func main() {
 	fmt.Printf("  Dialect: %s\n", manager.GetDialect())
 
 	// Run the CLI
-	manager.Run()
+	manager.Run(ctx)
 }

@@ -65,5 +65,5 @@ func (c *RollbackCommand) Handle(ctx contracts.Context) error {
 			return fmt.Errorf("invalid step value: %w", err)
 		}
 	}
-	return c.Driver.RollbackMigration(step)
+	return c.Driver.RollbackMigration(c.Driver.Context(), step)
 }

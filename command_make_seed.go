@@ -44,5 +44,5 @@ func (c *MakeSeedCommand) Handle(ctx contracts.Context) error {
 	}
 	rawOption := ctx.Option("raw")
 	raw := rawOption == "true" || rawOption == "1"
-	return c.Driver.CreateSeedFile(name, raw)
+	return c.Driver.CreateSeedFile(c.Driver.Context(), name, raw)
 }
