@@ -8,8 +8,8 @@ require (
 	github.com/oarkflow/cli v0.0.3
 	github.com/oarkflow/expr v0.0.11
 	github.com/oarkflow/json v0.0.28
-	github.com/oarkflow/log v1.0.84
 	github.com/oarkflow/squealx v0.0.78
+	github.com/oarkflow/zlog v0.0.3
 )
 
 require (
@@ -28,7 +28,6 @@ require (
 	github.com/oarkflow/convert v0.0.6 // indirect
 	github.com/oarkflow/date v0.0.4 // indirect
 	github.com/oarkflow/jet v0.0.4 // indirect
-	github.com/oarkflow/xid v1.2.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/urfave/cli/v3 v3.13.0 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect

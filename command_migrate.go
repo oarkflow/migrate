@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oarkflow/cli/contracts"
+	"github.com/oarkflow/zlog"
 )
 
 type MigrateCommand struct {
@@ -79,20 +80,20 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		}
 	}
 	if err := c.Driver.ValidateHistoryStorage(runCtx); err != nil {
-		logger.Error().Err(err).Msg("History storage validation failed")
+		logger.Error("History storage validation failed", zlog.Err(err))
 		return fmt.Errorf("history storage validation failed: %w", err)
 	}
 	if err := acquireLock(); err != nil {
-		logger.Error().Err(err).Msg("Cannot start migration (failed to acquire lock)")
+		logger.Error("Cannot start migration (failed to acquire lock)", zlog.Err(err))
 		return fmt.Errorf("cannot start migration: %w", err)
 	}
 	defer func() {
 		if err := releaseLock(); err != nil {
-			logger.Printf("Warning releasing lock: %v", err)
+			logger.Info(fmt.Sprintf("Warning releasing lock: %v", err))
 		}
 	}()
 	if err := c.Driver.ValidateMigrations(runCtx); err != nil {
-		logger.Printf("Validation warning: %v", err)
+		logger.Info(fmt.Sprintf("Validation warning: %v", err))
 	}
 	// Collect migration files (.bcl) - prefer Manager.ListMigrationMap when available
 	var migrationFiles []string
@@ -101,7 +102,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	if mgr, ok := c.Driver.(*Manager); ok {
 		migrationMap, err := mgr.ListMigrationMap()
 		if err != nil {
-			logger.Error().Err(err).Msg("Failed to list migrations from manager")
+			logger.Error("Failed to list migrations from manager", zlog.Err(err))
 			return fmt.Errorf("failed to list migrations: %w", err)
 		}
 		seenPaths := make(map[string]struct{}, len(migrationMap))
@@ -142,7 +143,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 			return nil
 		})
 		if err != nil {
-			logger.Error().Err(err).Msgf("Failed to walk migration directory: %s", c.Driver.MigrationDir())
+			logger.Error(fmt.Sprintf("Failed to walk migration directory: %s", c.Driver.MigrationDir()), zlog.Err(err))
 			return fmt.Errorf("failed to walk migration directory: %w", err)
 		}
 		readFile = os.ReadFile
@@ -178,11 +179,11 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		// Handle raw .sql migrations
 		if ext == ".sql" {
 			if !includeRaw {
-				logger.Info().Msgf("Skipping raw SQL migration (enable with --include-raw=true): %s", path)
+				logger.Info(fmt.Sprintf("Skipping raw SQL migration (enable with --include-raw=true): %s", path))
 				continue
 			}
 			if err := c.Driver.ApplySQLMigration(runCtx, path); err != nil {
-				logger.Error().Err(err).Msgf("Failed to apply raw SQL migration %s", name)
+				logger.Error(fmt.Sprintf("Failed to apply raw SQL migration %s", name), zlog.Err(err))
 				if forceFlag {
 					continue
 				}
@@ -194,7 +195,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 		// Default: .bcl migration
 		migrations, err := readMigrations(path)
 		if err != nil {
-			logger.Error().Err(err).Msgf("Failed to parse migration file %s", name)
+			logger.Error(fmt.Sprintf("Failed to parse migration file %s", name), zlog.Err(err))
 			return fmt.Errorf("failed to parse migration file %s: %w", name, err)
 		}
 		if len(migrations) == 0 {
@@ -208,7 +209,7 @@ func (c *MigrateCommand) Handle(ctx contracts.Context) error {
 	}
 	if shouldSeed {
 		if err := c.runSeedFilesAfterMigration(runCtx, includeRaw); err != nil {
-			logger.Error().Err(err).Msg("Running seed files after migration failed")
+			logger.Error("Running seed files after migration failed", zlog.Err(err))
 			return err
 		}
 	}
@@ -224,7 +225,7 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(ctx context.Context, include
 	if mgr, ok := c.Driver.(*Manager); ok {
 		mgrFiles, err := mgr.ListSeedFiles(includeRaw)
 		if err != nil {
-			logger.Error().Err(err).Msg("Failed to list seed files from manager")
+			logger.Error("Failed to list seed files from manager", zlog.Err(err))
 			return fmt.Errorf("failed to list seed files: %w", err)
 		}
 		files = append(files, mgrFiles...)
@@ -234,7 +235,7 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(ctx context.Context, include
 			if os.IsNotExist(err) {
 				return nil
 			}
-			logger.Error().Err(err).Msgf("Failed to read seed directory %s", seedDir)
+			logger.Error(fmt.Sprintf("Failed to read seed directory %s", seedDir), zlog.Err(err))
 			return fmt.Errorf("failed to read seed directory %s: %w", seedDir, err)
 		}
 		for _, entry := range entries {
@@ -261,9 +262,9 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(ctx context.Context, include
 		return filepath.Base(files[i]) < filepath.Base(files[j])
 	})
 
-	logger.Info().Msgf("Running %d seed file(s) after migration", len(files))
+	logger.Info(fmt.Sprintf("Running %d seed file(s) after migration", len(files)))
 	if err := c.Driver.RunSeeds(ctx, false, includeRaw, files...); err != nil {
-		logger.Error().Err(err).Msg("Failed to run seed files after migration")
+		logger.Error("Failed to run seed files after migration", zlog.Err(err))
 		return fmt.Errorf("failed to apply seed files after migration: %w", err)
 	}
 	return nil
@@ -271,21 +272,21 @@ func (c *MigrateCommand) runSeedFilesAfterMigration(ctx context.Context, include
 
 func (c *MigrateCommand) applyParsedMigration(ctx context.Context, migration Migration, fileName string, shouldSeed bool, seedRows int, forceFlag bool) error {
 	if err := requireFields(migration.Name); err != nil {
-		logger.Error().Err(err).Msgf("Migration %s failed required field check", fileName)
+		logger.Error(fmt.Sprintf("Migration %s failed required field check", fileName), zlog.Err(err))
 		return fmt.Errorf("MigrateCommand.Handle: %w", err)
 	}
 	if migration.Disable {
-		logger.Warn().Msgf("Migration '%s' is disabled. To enable it, set Disabled: false or remove the Disabled field.", migration.Name)
+		logger.Warn(fmt.Sprintf("Migration '%s' is disabled. To enable it, set Disabled: false or remove the Disabled field.", migration.Name))
 		return nil
 	}
 	for _, val := range migration.Validate {
 		if err := runPreUpChecks(val.PreUpChecks); err != nil {
-			logger.Error().Err(err).Msgf("Pre-up validation failed for migration %s", migration.Name)
+			logger.Error(fmt.Sprintf("Pre-up validation failed for migration %s", migration.Name), zlog.Err(err))
 			return fmt.Errorf("pre-up validation failed for migration %s: %w", migration.Name, err)
 		}
 	}
 	if err := c.Driver.ApplyMigration(ctx, migration); err != nil {
-		logger.Error().Msgf("Failed to apply migration %s: %v", migration.Name, err)
+		logger.Error(fmt.Sprintf("Failed to apply migration %s: %v", migration.Name, err))
 		if forceFlag {
 			return nil
 		}
@@ -293,7 +294,7 @@ func (c *MigrateCommand) applyParsedMigration(ctx context.Context, migration Mig
 	}
 	for _, val := range migration.Validate {
 		if err := runPostUpChecks(val.PostUpChecks); err != nil {
-			logger.Error().Err(err).Msgf("Post-up validation failed for migration %s", migration.Name)
+			logger.Error(fmt.Sprintf("Post-up validation failed for migration %s", migration.Name), zlog.Err(err))
 			return fmt.Errorf("post-up validation failed for migration %s: %w", migration.Name, err)
 		}
 	}
@@ -310,7 +311,7 @@ func (c *MigrateCommand) autoSeedCreatedTables(ctx context.Context, migration Mi
 	}
 	for _, ct := range migration.Up.CreateTable {
 		if err := requireFields(ct.Name); err != nil {
-			logger.Error().Err(err).Msgf("Seed generation: missing required table name in migration %s", fileName)
+			logger.Error(fmt.Sprintf("Seed generation: missing required table name in migration %s", fileName), zlog.Err(err))
 			return fmt.Errorf("MigrateCommand.Handle (seed): %w", err)
 		}
 		seedDef := SeedDefinition{
@@ -320,7 +321,7 @@ func (c *MigrateCommand) autoSeedCreatedTables(ctx context.Context, migration Mi
 		}
 		for _, col := range ct.AddFields {
 			if err := requireFields(col.Name); err != nil {
-				logger.Error().Err(err).Msgf("Seed generation: missing required field name in table %s (migration %s)", ct.Name, fileName)
+				logger.Error(fmt.Sprintf("Seed generation: missing required field name in table %s (migration %s)", ct.Name, fileName), zlog.Err(err))
 				return fmt.Errorf("MigrateCommand.Handle (seed field): %w", err)
 			}
 			if col.AutoIncrement || col.Nullable {
@@ -370,14 +371,14 @@ func (c *MigrateCommand) autoSeedCreatedTables(ctx context.Context, migration Mi
 		}
 		queries, err := seedDef.ToSQL(mgr.dialect)
 		if err != nil {
-			logger.Error().Msgf("Failed to generate seed SQL for table %s: %v", ct.Name, err)
+			logger.Error(fmt.Sprintf("Failed to generate seed SQL for table %s: %v", ct.Name, err))
 			return fmt.Errorf("failed to generate seed SQL for table %s: %w", ct.Name, err)
 		}
-		logger.Info().Msgf("Seeding table: %s", ct.Name)
+		logger.Info(fmt.Sprintf("Seeding table: %s", ct.Name))
 		for _, q := range queries {
-			logger.Info().Msgf("Seed SQL: %s", q.SQL)
+			logger.Info(fmt.Sprintf("Seed SQL: %s", q.SQL))
 			if err := mgr.dbDriver.ApplySQL(ctx, []string{q.SQL}, q.Args); err != nil {
-				logger.Error().Err(err).Msgf("Failed to apply seed SQL for table %s: %s", ct.Name, q.SQL)
+				logger.Error(fmt.Sprintf("Failed to apply seed SQL for table %s: %s", ct.Name, q.SQL), zlog.Err(err))
 				return fmt.Errorf("failed to apply seed for table %s: %w", ct.Name, err)
 			}
 		}

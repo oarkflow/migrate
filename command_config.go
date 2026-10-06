@@ -82,8 +82,8 @@ func (c *ConfigInitCommand) Handle(ctx contracts.Context) error {
 		return fmt.Errorf("failed to create configuration file: %w", err)
 	}
 
-	logger.Info().Msgf("Configuration file created: %s", configPath)
-	logger.Info().Msg("Please edit the configuration file with your database settings")
+	logger.Info(fmt.Sprintf("Configuration file created: %s", configPath))
+	logger.Info("Please edit the configuration file with your database settings")
 
 	return nil
 }
@@ -126,10 +126,10 @@ func (c *ConfigValidateCommand) Handle(ctx contracts.Context) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
-	logger.Info().Msgf("Configuration file %s is valid", configPath)
-	logger.Info().Msgf("Database driver: %s", config.Database.Driver)
-	logger.Info().Msgf("Migration directory: %s", config.Migration.Directory)
-	logger.Info().Msgf("Seed directory: %s", config.Seed.Directory)
+	logger.Info(fmt.Sprintf("Configuration file %s is valid", configPath))
+	logger.Info(fmt.Sprintf("Database driver: %s", config.Database.Driver))
+	logger.Info(fmt.Sprintf("Migration directory: %s", config.Migration.Directory))
+	logger.Info(fmt.Sprintf("Seed directory: %s", config.Seed.Directory))
 
 	return nil
 }

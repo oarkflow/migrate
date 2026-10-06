@@ -15,7 +15,7 @@ import (
 
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/contracts"
-	"github.com/oarkflow/log"
+	"github.com/oarkflow/zlog"
 	"github.com/oarkflow/squealx"
 )
 
@@ -24,15 +24,12 @@ var (
 	Version = "v0.0.1"
 )
 
-var logger = log.Logger{
+var logger = zlog.New(zlog.Options{
+	Level:      zlog.InfoLevel,
+	Sink:       zlog.NewWriterSink(os.Stdout, zlog.NewConsoleEncoder(), zlog.TraceLevel),
+	AddCaller:  true,
 	TimeFormat: "15:04:05",
-	Caller:     1,
-	Writer: &log.ConsoleWriter{
-		ColorOutput:    true,
-		QuoteString:    true,
-		EndWithMessage: true,
-	},
-}
+})
 
 type IDatabaseDriver interface {
 	ApplySQL(ctx context.Context, queries []string, args ...any) error
@@ -161,7 +158,7 @@ func WithConfig(config *MigrateConfig) ManagerOption {
 			if drv, err := NormalizeDriver(config.Database.Driver); err == nil {
 				normalizedDriver = drv
 			} else {
-				logger.Error().Err(err).Msgf("Invalid database driver in config: %s", config.Database.Driver)
+				logger.Error(fmt.Sprintf("Invalid database driver in config: %s", config.Database.Driver), zlog.Err(err))
 			}
 		}
 
@@ -186,10 +183,10 @@ func WithConfig(config *MigrateConfig) ManagerOption {
 					if err == nil {
 						m.historyDriver = historyDriver
 					} else {
-						logger.Error().Err(err).Msgf("Failed to initialize history driver from config (dsn=%s)", redactDSN(dsn))
+						logger.Error(fmt.Sprintf("Failed to initialize history driver from config (dsn=%s)", redactDSN(dsn)), zlog.Err(err))
 					}
 				} else {
-					logger.Error().Err(err).Msgf("Failed to initialize database driver from config (dsn=%s)", redactDSN(dsn))
+					logger.Error(fmt.Sprintf("Failed to initialize database driver from config (dsn=%s)", redactDSN(dsn)), zlog.Err(err))
 				}
 			}
 		}
@@ -227,10 +224,10 @@ func NewManager(opts ...ManagerOption) *Manager {
 		opt(m)
 	}
 	if err := os.MkdirAll(m.migrationDir, fs.ModePerm); err != nil {
-		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
+		logger.Fatal(fmt.Sprintf("Failed to create migration directory: %v", err))
 	}
 	if err := os.MkdirAll(m.seedDir, fs.ModePerm); err != nil {
-		logger.Fatal().Msgf("Failed to create migration directory: %v", err)
+		logger.Fatal(fmt.Sprintf("Failed to create migration directory: %v", err))
 	}
 	return m
 }
@@ -603,7 +600,7 @@ func (d *Manager) ApplyMigration(ctx context.Context, m Migration) error {
 		return fmt.Errorf("ApplyMigration: invalid migration name: %w", err)
 	}
 	if m.Disable {
-		logger.Warn().Msgf("Migration '%s' is disabled and will not be applied.", m.Name)
+		logger.Warn(fmt.Sprintf("Migration '%s' is disabled and will not be applied.", m.Name))
 		return nil
 	}
 
@@ -632,12 +629,12 @@ func (d *Manager) ApplyMigration(ctx context.Context, m Migration) error {
 		if h.Name == m.Name {
 			if h.Checksum == checksum {
 				if d.Verbose {
-					logger.Info().Msgf("Migration '%s' already applied, skipping", m.Name)
+					logger.Info(fmt.Sprintf("Migration '%s' already applied, skipping", m.Name))
 				}
 				return nil
 			}
 			if d.Force {
-				logger.Warn().Msgf("Checksum mismatch for '%s', force-applying", m.Name)
+				logger.Warn(fmt.Sprintf("Checksum mismatch for '%s', force-applying", m.Name))
 				d.historyDriver.Rollback(ctx, h)
 				break
 			}
@@ -676,16 +673,16 @@ func (d *Manager) ApplyMigration(ctx context.Context, m Migration) error {
 		return fmt.Errorf("failed to generate SQL: %w", err)
 	}
 	if d.Verbose {
-		logger.Info().Msgf("Migration '%s' details:", m.Name)
+		logger.Info(fmt.Sprintf("Migration '%s' details:", m.Name))
 		for _, q := range queries {
-			logger.Info().Msg(q)
+			logger.Info(q)
 		}
 	}
 	if dbDriver == nil {
 		return fmt.Errorf("no database driver configured for migration '%s'", m.Name)
 	}
 	if len(queries) == 0 {
-		logger.Info().Msgf("Migration '%s' has no operations to perform", m.Name)
+		logger.Info(fmt.Sprintf("Migration '%s' has no operations to perform", m.Name))
 		return nil
 	}
 	for _, val := range migration.Validate {
@@ -702,7 +699,7 @@ func (d *Manager) ApplyMigration(ctx context.Context, m Migration) error {
 		}
 	}
 	now := time.Now()
-	logger.Info().Msgf("Applied migration: %s at %v", m.Name, now.Format(time.DateTime))
+	logger.Info(fmt.Sprintf("Applied migration: %s at %v", m.Name, now.Format(time.DateTime)))
 	history := MigrationHistory{
 		Name:        m.Name,
 		Version:     m.Version,
@@ -730,7 +727,7 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 
 	total := len(histories)
 	if total == 0 {
-		logger.Info().Msg("No migrations to rollback")
+		logger.Info("No migrations to rollback")
 		return nil
 	}
 
@@ -739,7 +736,7 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 	}
 
 	if step > total {
-		logger.Info().Msgf("Requested rollback steps (%d) exceeds total applied migrations (%d), rolling back all", step, total)
+		logger.Info(fmt.Sprintf("Requested rollback steps (%d) exceeds total applied migrations (%d), rolling back all", step, total))
 		step = total
 	}
 	migrationMap, err := d.ListMigrationMap()
@@ -760,7 +757,7 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 		name := last.Name
 		path, ok := migrationMap[name]
 		if !ok {
-			logger.Warn().Msgf("Migration file for %s not found; removing history entry and continuing", name)
+			logger.Warn(fmt.Sprintf("Migration file for %s not found; removing history entry and continuing", name))
 			histories = histories[:len(histories)-1]
 			continue
 		}
@@ -768,7 +765,7 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 		if ext == ".sql" {
 			data, err := d.readFile(path)
 			if err != nil {
-				logger.Warn().Msgf("Failed to read migration file %s for rollback: %v; removing history entry and continuing", name, err)
+				logger.Warn(fmt.Sprintf("Failed to read migration file %s for rollback: %v; removing history entry and continuing", name, err))
 				histories = histories[:len(histories)-1]
 				continue
 			}
@@ -778,7 +775,7 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 				if !d.Force {
 					return fmt.Errorf("raw migration %s has no down SQL", name)
 				}
-				logger.Info().Msgf("Raw migration '%s' has no down section, skipping rollback", name)
+				logger.Info(fmt.Sprintf("Raw migration '%s' has no down section, skipping rollback", name))
 				histories = histories[:len(histories)-1]
 				continue
 			}
@@ -786,38 +783,38 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 				return fmt.Errorf("no database driver configured for rollback of %s", name)
 			}
 			if d.Verbose {
-				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
+				logger.Info(fmt.Sprintf("Rollback raw SQL for '%s': %s", name, down))
 			}
 			if err := d.dbDriver.ApplySQL(ctx, []string{down}); err != nil {
 				if !d.Force {
 					return fmt.Errorf("failed to rollback raw migration %s: %w", name, err)
 				}
-				logger.Warn().Msgf("Failed to rollback raw migration %s (continuing): %v", name, err)
+				logger.Warn(fmt.Sprintf("Failed to rollback raw migration %s (continuing): %v", name, err))
 			} else {
-				logger.Info().Msg("Rolled back migration: " + name)
+				logger.Info("Rolled back migration: " + name)
 			}
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		cached, err := d.readMigrationsBCL(path)
 		if err != nil {
-			logger.Warn().Msgf("Failed to parse migration file %s for rollback: %v; removing history entry and continuing", name, err)
+			logger.Warn(fmt.Sprintf("Failed to parse migration file %s for rollback: %v; removing history entry and continuing", name, err))
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		migration, ok := findMigrationByName(cached.migrations, name)
 		if !ok {
-			logger.Warn().Msgf("Migration %s not found in %s for rollback; removing history entry and continuing", name, path)
+			logger.Warn(fmt.Sprintf("Migration %s not found in %s for rollback; removing history entry and continuing", name, path))
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		if err := requireFields(migration.Name); err != nil {
-			logger.Warn().Msgf("Migration %s failed required field check for rollback: %v; removing history entry and continuing", name, err)
+			logger.Warn(fmt.Sprintf("Migration %s failed required field check for rollback: %v; removing history entry and continuing", name, err))
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		if migration.Disable {
-			logger.Warn().Msgf("Migration '%s' is disabled, skipping rollback.", migration.Name)
+			logger.Warn(fmt.Sprintf("Migration '%s' is disabled, skipping rollback.", migration.Name))
 			// Still remove from history since user requested rollback
 			histories = histories[:len(histories)-1]
 			continue
@@ -847,22 +844,22 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 			return fmt.Errorf("no rollback SQL found for migration %s; aborting", name)
 		}
 		if d.Verbose {
-			logger.Info().Msgf("Rollback of migration '%s' details:", name)
+			logger.Info(fmt.Sprintf("Rollback of migration '%s' details:", name))
 			for _, q := range downQueries {
-				logger.Info().Msg(q)
+				logger.Info(q)
 			}
 		}
 		if err := dbDriver.ApplySQL(ctx, downQueries); err != nil {
 			if !d.Force {
 				return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 			}
-			logger.Warn().Msgf("Failed to rollback migration %s (continuing): %v", name, err)
+			logger.Warn(fmt.Sprintf("Failed to rollback migration %s (continuing): %v", name, err))
 			histories = histories[:len(histories)-1]
 			if histErr := d.historyDriver.Rollback(ctx, histories...); histErr != nil {
-				logger.Error().Msgf("Failed to update history after rollback error: %v", histErr)
+				logger.Error(fmt.Sprintf("Failed to update history after rollback error: %v", histErr))
 			}
 		} else {
-			logger.Info().Msg("Rolled back migration: " + name)
+			logger.Info("Rolled back migration: " + name)
 			histories = histories[:len(histories)-1]
 		}
 	}
@@ -875,7 +872,7 @@ func (d *Manager) RollbackMigration(ctx context.Context, step int) error {
 }
 
 func (d *Manager) ResetMigrations(ctx context.Context) error {
-	logger.Info().Msg("Resetting migrations...")
+	logger.Info("Resetting migrations...")
 
 	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
@@ -883,7 +880,7 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 	}
 
 	if len(histories) == 0 {
-		logger.Info().Msg("No migrations to reset")
+		logger.Info("No migrations to reset")
 		return nil
 	}
 
@@ -898,7 +895,7 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 		name := last.Name
 		path, ok := migrationMap[name]
 		if !ok {
-			logger.Warn().Msgf("Migration file for %s not found; removing history entry and continuing", name)
+			logger.Warn(fmt.Sprintf("Migration file for %s not found; removing history entry and continuing", name))
 			histories = histories[:len(histories)-1]
 			continue
 		}
@@ -906,7 +903,7 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 		if ext == ".sql" {
 			data, err := d.readFile(path)
 			if err != nil {
-				logger.Warn().Msgf("Failed to read migration file %s for rollback: %v; removing history entry and continuing", name, err)
+				logger.Warn(fmt.Sprintf("Failed to read migration file %s for rollback: %v; removing history entry and continuing", name, err))
 				histories = histories[:len(histories)-1]
 				continue
 			}
@@ -915,7 +912,7 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 				if !d.Force {
 					return fmt.Errorf("raw migration %s has no down SQL", name)
 				}
-				logger.Info().Msgf("Raw migration '%s' has no down section, skipping rollback", name)
+				logger.Info(fmt.Sprintf("Raw migration '%s' has no down section, skipping rollback", name))
 				histories = histories[:len(histories)-1]
 				continue
 			}
@@ -923,38 +920,38 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 				return fmt.Errorf("no database driver configured for rollback of %s", name)
 			}
 			if d.Verbose {
-				logger.Info().Msgf("Rollback raw SQL for '%s': %s", name, down)
+				logger.Info(fmt.Sprintf("Rollback raw SQL for '%s': %s", name, down))
 			}
 			if err := d.dbDriver.ApplySQL(ctx, []string{down}); err != nil {
 				if !d.Force {
 					return fmt.Errorf("failed to rollback raw migration %s: %w", name, err)
 				}
-				logger.Warn().Msgf("Failed to rollback raw migration %s (continuing): %v", name, err)
+				logger.Warn(fmt.Sprintf("Failed to rollback raw migration %s (continuing): %v", name, err))
 			} else {
-				logger.Info().Msg("Rolled back migration: " + name)
+				logger.Info("Rolled back migration: " + name)
 			}
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		cached, err := d.readMigrationsBCL(path)
 		if err != nil {
-			logger.Warn().Msgf("Failed to parse migration file %s for rollback: %v; removing history entry and continuing", name, err)
+			logger.Warn(fmt.Sprintf("Failed to parse migration file %s for rollback: %v; removing history entry and continuing", name, err))
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		migration, ok := findMigrationByName(cached.migrations, name)
 		if !ok {
-			logger.Warn().Msgf("Migration %s not found in %s for reset; removing history entry and continuing", name, path)
+			logger.Warn(fmt.Sprintf("Migration %s not found in %s for reset; removing history entry and continuing", name, path))
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		if err := requireFields(migration.Name); err != nil {
-			logger.Warn().Msgf("Migration %s failed required field check for reset: %v; removing history entry and continuing", name, err)
+			logger.Warn(fmt.Sprintf("Migration %s failed required field check for reset: %v; removing history entry and continuing", name, err))
 			histories = histories[:len(histories)-1]
 			continue
 		}
 		if migration.Disable {
-			logger.Warn().Msgf("Migration '%s' is disabled, skipping reset.", migration.Name)
+			logger.Warn(fmt.Sprintf("Migration '%s' is disabled, skipping reset.", migration.Name))
 			// Still remove from history since user requested reset
 			histories = histories[:len(histories)-1]
 			continue
@@ -984,9 +981,9 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 			return fmt.Errorf("no rollback SQL found for migration %s; aborting", name)
 		}
 		if d.Verbose {
-			logger.Info().Msgf("Rollback of migration '%s' details:", name)
+			logger.Info(fmt.Sprintf("Rollback of migration '%s' details:", name))
 			for _, q := range downQueries {
-				logger.Info().Msg(q)
+				logger.Info(q)
 			}
 		}
 		if err := dbDriver.ApplySQL(ctx, downQueries); err != nil {
@@ -994,11 +991,11 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 				return fmt.Errorf("failed to rollback migration %s: %w", name, err)
 			}
 			histories = histories[:len(histories)-1]
-			logger.Warn().Msgf("Failed to rollback migration %s (continuing): %v", name, err)
+			logger.Warn(fmt.Sprintf("Failed to rollback migration %s (continuing): %v", name, err))
 		} else {
 			histories = histories[:len(histories)-1]
 		}
-		logger.Info().Msg("Rolled back migration: " + name)
+		logger.Info("Rolled back migration: " + name)
 	}
 
 	// Clear all history after successful rollback of all migrations
@@ -1008,12 +1005,12 @@ func (d *Manager) ResetMigrations(ctx context.Context) error {
 func (d *Manager) ValidateMigrations(ctx context.Context) error {
 	migrationMap, err := d.ListMigrationMap()
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to list migration files")
+		logger.Error("Failed to list migration files", zlog.Err(err))
 		return fmt.Errorf("failed to list migration files: %w", err)
 	}
 	histories, err := d.historyDriver.Load(ctx)
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to load migration history")
+		logger.Error("Failed to load migration history", zlog.Err(err))
 		return err
 	}
 	applied := make(map[string]bool)
@@ -1038,10 +1035,10 @@ func (d *Manager) ValidateMigrations(ctx context.Context) error {
 	}
 	toApply := len(missing)
 	if toApply > 0 {
-		logger.Info().Msgf("Migration initiated for: %v", toApply)
+		logger.Info(fmt.Sprintf("Migration initiated for: %v", toApply))
 		return nil
 	}
-	logger.Info().Msg("Migrations are up to date.")
+	logger.Info("Migrations are up to date.")
 	return nil
 }
 
@@ -1073,7 +1070,7 @@ func (d *Manager) CreateSeedFile(ctx context.Context, name string, raw bool) err
 	if err := os.WriteFile(filename, []byte(template), 0644); err != nil {
 		return fmt.Errorf("failed to create seed file: %w", err)
 	}
-	logger.Printf("Seed file created: %s", filename)
+	logger.Info(fmt.Sprintf("Seed file created: %s", filename))
 	return nil
 }
 
@@ -1113,7 +1110,7 @@ func (d *Manager) CreateMigrationFile(ctx context.Context, name string, raw bool
 		if err := os.WriteFile(filename, []byte(template), 0644); err != nil {
 			return fmt.Errorf("failed to create raw migration file: %w", err)
 		}
-		logger.Printf("Raw SQL migration file created: %s", filename)
+		logger.Info(fmt.Sprintf("Raw SQL migration file created: %s", filename))
 		return nil
 	}
 	tokens := strings.Split(name, "_")
@@ -1380,7 +1377,7 @@ func (d *Manager) CreateMigrationFile(ctx context.Context, name string, raw bool
 	if err := os.WriteFile(filename, []byte(template), 0644); err != nil {
 		return fmt.Errorf("failed to create migration file: %w", err)
 	}
-	logger.Printf("Migration file created: %s", filename)
+	logger.Info(fmt.Sprintf("Migration file created: %s", filename))
 	return nil
 }
 
@@ -1484,12 +1481,12 @@ func (d *Manager) ApplySQLMigration(ctx context.Context, path string) error {
 		if h.Name == name {
 			if h.Checksum == checksum {
 				if d.Verbose {
-					logger.Info().Msgf("Migration '%s' already applied, skipping", name)
+					logger.Info(fmt.Sprintf("Migration '%s' already applied, skipping", name))
 				}
 				return nil
 			}
 			if d.Force {
-				logger.Warn().Msgf("Checksum mismatch for '%s', force-applying", name)
+				logger.Warn(fmt.Sprintf("Checksum mismatch for '%s', force-applying", name))
 				d.historyDriver.Rollback(ctx, h)
 				break
 			}
@@ -1504,8 +1501,8 @@ func (d *Manager) ApplySQLMigration(ctx context.Context, path string) error {
 		return fmt.Errorf("no database driver configured for migration '%s'", name)
 	}
 	if d.Verbose {
-		logger.Info().Msgf("Applying raw SQL migration '%s' details:", name)
-		logger.Info().Msg(up)
+		logger.Info(fmt.Sprintf("Applying raw SQL migration '%s' details:", name))
+		logger.Info(up)
 	}
 	if err := d.dbDriver.ApplySQL(ctx, []string{up}); err != nil {
 		return fmt.Errorf("failed to apply raw migration %s: %w", name, err)
@@ -1567,10 +1564,10 @@ func acquireLock() error {
 		age := time.Since(info.AcquiredAt)
 		timeout := lockTimeout()
 		if timeout > 0 && age > timeout {
-			logger.Warn().Msgf(
+			logger.Warn(fmt.Sprintf(
 				"Stale migration lock detected (pid=%d host=%s acquired_at=%s age=%s exceeds lock_timeout=%s); removing stale lock and proceeding",
 				info.PID, info.Hostname, info.AcquiredAt.Format(time.RFC3339), age, timeout,
-			)
+			))
 			if err := os.Remove(lockFileName); err != nil {
 				return fmt.Errorf("failed to remove stale migration lock: %w", err)
 			}
@@ -1609,25 +1606,25 @@ func releaseLock() error {
 
 func runPreUpChecks(checks []string) error {
 	for _, check := range checks {
-		logger.Printf("Executing PreUpCheck: %s", check)
+		logger.Info(fmt.Sprintf("Executing PreUpCheck: %s", check))
 
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PreUp check failed: %s", check)
 		}
 	}
-	logger.Info().Msg("All PreUpChecks passed.")
+	logger.Info("All PreUpChecks passed.")
 	return nil
 }
 
 func runPostUpChecks(checks []string) error {
 	for _, check := range checks {
-		logger.Printf("Executing PostUpCheck: %s", check)
+		logger.Info(fmt.Sprintf("Executing PostUpCheck: %s", check))
 
 		if strings.Contains(strings.ToLower(check), "fail") {
 			return fmt.Errorf("PostUp check failed: %s", check)
 		}
 	}
-	logger.Info().Msg("All PostUpChecks passed.")
+	logger.Info("All PostUpChecks passed.")
 	return nil
 }
 
@@ -1637,13 +1634,13 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 	}
 
 	if len(seedFiles) == 0 {
-		logger.Info().Msg("No seed files provided")
+		logger.Info("No seed files provided")
 		return nil
 	}
 
 	for _, seedFile := range seedFiles {
 		if seedFile == "" {
-			logger.Warn().Msg("Empty seed file path, skipping")
+			logger.Warn("Empty seed file path, skipping")
 			continue
 		}
 
@@ -1651,12 +1648,12 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 		switch ext {
 		case ".sql":
 			if !includeRaw {
-				logger.Info().Msgf("Skipping raw seed file (enable with --include-raw): %s", seedFile)
+				logger.Info(fmt.Sprintf("Skipping raw seed file (enable with --include-raw): %s", seedFile))
 				continue
 			}
 			data, err := d.readFile(seedFile)
 			if err != nil {
-				logger.Error().Msgf("Failed to read seed file '%s': %v", seedFile, err)
+				logger.Error(fmt.Sprintf("Failed to read seed file '%s': %v", seedFile, err))
 				if !d.Force {
 					return fmt.Errorf("failed to read seed file %s: %w", seedFile, err)
 				}
@@ -1664,18 +1661,18 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 			}
 			sql := strings.TrimSpace(string(data))
 			if sql == "" {
-				logger.Info().Msgf("Raw seed file '%s' is empty, skipping", seedFile)
+				logger.Info(fmt.Sprintf("Raw seed file '%s' is empty, skipping", seedFile))
 				continue
 			}
 			if d.Verbose {
-				logger.Info().Msgf("Raw seed SQL (%d bytes)", len(sql))
+				logger.Info(fmt.Sprintf("Raw seed SQL (%d bytes)", len(sql)))
 			}
 			if truncate {
-				logger.Warn().Msgf("Truncate flag ignored for raw seed file: %s", seedFile)
+				logger.Warn(fmt.Sprintf("Truncate flag ignored for raw seed file: %s", seedFile))
 			}
-			logger.Info().Msgf("Applying raw seed file: %s", seedFile)
+			logger.Info(fmt.Sprintf("Applying raw seed file: %s", seedFile))
 			if err := d.dbDriver.ApplySQL(ctx, []string{sql}); err != nil {
-				logger.Error().Msgf("Failed to apply raw seed file '%s': %v", seedFile, err)
+				logger.Error(fmt.Sprintf("Failed to apply raw seed file '%s': %v", seedFile, err))
 				if !d.Force {
 					return fmt.Errorf("failed to apply raw seed file %s: %w", seedFile, err)
 				}
@@ -1684,20 +1681,20 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 		case ".bcl":
 			cached, err := d.readSeedsBCL(seedFile)
 			if err != nil {
-				logger.Error().Msgf("Failed to parse seed file '%s': %v", seedFile, err)
+				logger.Error(fmt.Sprintf("Failed to parse seed file '%s': %v", seedFile, err))
 				if !d.Force {
 					return fmt.Errorf("failed to parse seed file %s: %w", seedFile, err)
 				}
 				continue
 			}
 			if len(cached.seeds) == 0 {
-				logger.Info().Msgf("Seed file '%s' contains no Seed blocks, skipping", seedFile)
+				logger.Info(fmt.Sprintf("Seed file '%s' contains no Seed blocks, skipping", seedFile))
 				continue
 			}
 
 			for _, seed := range cached.seeds {
 				if err := requireFields(seed.Name, seed.Table); err != nil {
-					logger.Error().Msgf("Invalid seed configuration in '%s': %v", seedFile, err)
+					logger.Error(fmt.Sprintf("Invalid seed configuration in '%s': %v", seedFile, err))
 					if !d.Force {
 						return fmt.Errorf("invalid seed configuration in %s: %w", seedFile, err)
 					}
@@ -1706,7 +1703,7 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 
 				queries, err := seed.ToSQL(d.dialect)
 				if err != nil {
-					logger.Error().Msgf("Failed to generate seed SQL for '%s': %v", seedFile, err)
+					logger.Error(fmt.Sprintf("Failed to generate seed SQL for '%s': %v", seedFile, err))
 					if !d.Force {
 						return fmt.Errorf("failed to generate seed SQL for %s: %w", seedFile, err)
 					}
@@ -1714,38 +1711,38 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 				}
 
 				if len(queries) == 0 {
-					logger.Info().Msgf("Seed '%s' in file '%s' generated no queries, skipping", seed.Name, seedFile)
+					logger.Info(fmt.Sprintf("Seed '%s' in file '%s' generated no queries, skipping", seed.Name, seedFile))
 					continue
 				}
 				if truncate {
 					query := getTruncateSQL(d.dialect, seed.Table)
 					if query != "" {
-						logger.Info().Msgf("Truncating table: %s", seed.Table)
+						logger.Info(fmt.Sprintf("Truncating table: %s", seed.Table))
 						if d.Verbose {
-							logger.Info().Msg("Executing truncate SQL")
+							logger.Info("Executing truncate SQL")
 						}
 						if err := d.dbDriver.ApplySQL(ctx, []string{query}); err != nil {
-							logger.Error().Msgf("Failed to truncate table '%s': %v", seed.Table, err)
+							logger.Error(fmt.Sprintf("Failed to truncate table '%s': %v", seed.Table, err))
 							if !d.Force {
 								return fmt.Errorf("failed to truncate table %s: %w", seed.Table, err)
 							}
 							continue
 						}
 					} else {
-						logger.Error().Msgf("Unsupported dialect for truncation: %s", d.dialect)
+						logger.Error(fmt.Sprintf("Unsupported dialect for truncation: %s", d.dialect))
 						if !d.Force {
 							return fmt.Errorf("unsupported dialect for truncation: %s", d.dialect)
 						}
 						continue
 					}
 				}
-				logger.Info().Msgf("Seeding table: %s", seed.Table)
+				logger.Info(fmt.Sprintf("Seeding table: %s", seed.Table))
 				for _, q := range queries {
 					if d.Verbose {
-						logger.Info().Msg("Executing seed SQL")
+						logger.Info("Executing seed SQL")
 					}
 					if err := d.dbDriver.ApplySQL(ctx, []string{q.SQL}, q.Args); err != nil {
-						logger.Error().Msgf("Seed failed (%s): %v", seedFile, err)
+						logger.Error(fmt.Sprintf("Seed failed (%s): %v", seedFile, err))
 						if !d.Force {
 							return fmt.Errorf("seed failed for %s: %w", seedFile, err)
 						}
@@ -1754,7 +1751,7 @@ func (d *Manager) RunSeeds(ctx context.Context, truncate bool, includeRaw bool, 
 				}
 			}
 		default:
-			logger.Warn().Msgf("Unsupported seed file type, skipping: %s", seedFile)
+			logger.Warn(fmt.Sprintf("Unsupported seed file type, skipping: %s", seedFile))
 		}
 	}
 	return nil

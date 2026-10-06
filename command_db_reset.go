@@ -82,9 +82,9 @@ func (c *ResetDatabaseCommand) Handle(ctx contracts.Context) error {
 	// Warning & confirmation
 	switch cfg.Database.Driver {
 	case "sqlite":
-		logger.Warn().Msgf("WARNING: This will permanently delete the sqlite database file at '%s'. All data will be lost.", cfg.Database.Database)
+		logger.Warn(fmt.Sprintf("WARNING: This will permanently delete the sqlite database file at '%s'. All data will be lost.", cfg.Database.Database))
 	default:
-		logger.Warn().Msgf("WARNING: This will permanently DROP and RECREATE the database '%s' on %s:%d. All data will be lost.", cfg.Database.Database, cfg.Database.Host, cfg.Database.Port)
+		logger.Warn(fmt.Sprintf("WARNING: This will permanently DROP and RECREATE the database '%s' on %s:%d. All data will be lost.", cfg.Database.Database, cfg.Database.Host, cfg.Database.Port))
 	}
 
 	if !force {
@@ -93,7 +93,7 @@ func (c *ResetDatabaseCommand) Handle(ctx contracts.Context) error {
 		resp, _ := r.ReadString('\n')
 		resp = strings.TrimSpace(resp)
 		if strings.ToLower(resp) != "yes" {
-			logger.Info().Msg("Aborted.")
+			logger.Info("Aborted.")
 			return nil
 		}
 	}
@@ -126,20 +126,20 @@ func resetPostgres(ctx context.Context, cfg *MigrateConfig) error {
 	terminate := fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid();", strings.ReplaceAll(cfg.Database.Database, "'", "''"))
 	if err := driver.ApplySQL(ctx, []string{terminate}); err != nil {
 		// Log as warning and continue; DROP may still fail if other connections remain
-		logger.Warn().Msgf("failed to terminate existing connections to '%s': %v", cfg.Database.Database, err)
+		logger.Warn(fmt.Sprintf("failed to terminate existing connections to '%s': %v", cfg.Database.Database, err))
 	}
 	drop := fmt.Sprintf("DROP DATABASE IF EXISTS \"%s\";", name)
 	// Create database from template0 to avoid inheriting objects from template1
 	create := fmt.Sprintf("CREATE DATABASE \"%s\" TEMPLATE template0;", name)
-	logger.Info().Msgf("Dropping database '%s'...", cfg.Database.Database)
+	logger.Info(fmt.Sprintf("Dropping database '%s'...", cfg.Database.Database))
 	if err := driver.ApplySQL(ctx, []string{drop}); err != nil {
 		return fmt.Errorf("failed to drop database: %w", err)
 	}
-	logger.Info().Msgf("Creating database '%s'...", cfg.Database.Database)
+	logger.Info(fmt.Sprintf("Creating database '%s'...", cfg.Database.Database))
 	if err := driver.ApplySQL(ctx, []string{create}); err != nil {
 		return fmt.Errorf("failed to create database: %w", err)
 	}
-	logger.Info().Msg("Database reset complete.")
+	logger.Info("Database reset complete.")
 	return nil
 }
 
@@ -155,21 +155,21 @@ func resetMySQL(ctx context.Context, cfg *MigrateConfig) error {
 	name := strings.ReplaceAll(cfg.Database.Database, "`", "``")
 	drop := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", name)
 	create := fmt.Sprintf("CREATE DATABASE `%s` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", name)
-	logger.Info().Msgf("Dropping database '%s'...", cfg.Database.Database)
+	logger.Info(fmt.Sprintf("Dropping database '%s'...", cfg.Database.Database))
 	if err := driver.ApplySQL(ctx, []string{drop}); err != nil {
 		return fmt.Errorf("failed to drop database: %w", err)
 	}
-	logger.Info().Msgf("Creating database '%s'...", cfg.Database.Database)
+	logger.Info(fmt.Sprintf("Creating database '%s'...", cfg.Database.Database))
 	if err := driver.ApplySQL(ctx, []string{create}); err != nil {
 		return fmt.Errorf("failed to create database: %w", err)
 	}
-	logger.Info().Msg("Database reset complete.")
+	logger.Info("Database reset complete.")
 	return nil
 }
 
 func resetSQLite(ctx context.Context, cfg *MigrateConfig) error {
 	path := cfg.Database.Database
-	logger.Info().Msgf("Removing sqlite file '%s'...", path)
+	logger.Info(fmt.Sprintf("Removing sqlite file '%s'...", path))
 	if _, err := os.Stat(path); err == nil {
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("failed to remove sqlite file: %w", err)
@@ -181,6 +181,6 @@ func resetSQLite(ctx context.Context, cfg *MigrateConfig) error {
 	if _, err := NewDriver(connectCtx, "sqlite", path); err != nil {
 		return fmt.Errorf("failed to create sqlite database: %w", err)
 	}
-	logger.Info().Msg("Database reset complete.")
+	logger.Info("Database reset complete.")
 	return nil
 }

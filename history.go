@@ -148,7 +148,7 @@ func SetupMigrationHistoryTable(ctx context.Context, dialect string, db *squealx
 		return err
 	}
 	if !exists {
-		logger.Info().Msg("Setting up migration history table...")
+		logger.Info("Setting up migration history table...")
 		query, err := dial.CreateTableSQL(stmt, true)
 		if err != nil {
 			return err
