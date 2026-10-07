@@ -15,8 +15,8 @@ import (
 
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/contracts"
-	"github.com/oarkflow/zlog"
 	"github.com/oarkflow/squealx"
+	"github.com/oarkflow/zlog"
 )
 
 var (
@@ -27,9 +27,12 @@ var (
 var logger = zlog.New(zlog.Options{
 	Level:      zlog.InfoLevel,
 	Sink:       zlog.NewWriterSink(os.Stdout, zlog.NewConsoleEncoder(), zlog.TraceLevel),
-	AddCaller:  true,
 	TimeFormat: "15:04:05",
 })
+
+func SetLogger(l *zlog.Logger) {
+	logger = l
+}
 
 type IDatabaseDriver interface {
 	ApplySQL(ctx context.Context, queries []string, args ...any) error
